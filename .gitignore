@@ -1,0 +1,28 @@
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+*.env
+
+# Python / Backend
+backend/venv/
+backend/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Node.js / Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/.vercel
+
+# Database
+*.db-journal
+
+# Operating System & IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
