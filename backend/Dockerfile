@@ -10,10 +10,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright browsers (if needed for iFood scraper)
-RUN playwright install-deps && playwright install chromium
-
+# Copy app files
 COPY . .
+
 
 # Run database seed on startup if db does not exist, then start server
 EXPOSE 5000
