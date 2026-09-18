@@ -4,7 +4,9 @@ import sqlite3
 import uuid
 import urllib.parse
 from datetime import datetime
+import requests
 from flask import Flask, request, jsonify
+
 from flask_cors import CORS
 from dotenv import load_dotenv
 from supabase import create_client, Client
@@ -768,7 +770,119 @@ def reset_pedidos_api():
     return jsonify({"status": "success", "message": "Banco resetado com os pedidos 0121, 0123, 0122"}), 200
 
 
+@app.route("/api/ai/roteirizar", methods=["POST"])
+def ai_roteirizar_pedidos():
+    """
+    Roteirizador de Entregas Inteligente com DeepSeek AI.
+    Analisa os pedidos pendentes/prontos, calcula proximidade de bairros,
+    tempo de espera (SLA) e capacidade dos entregadores para tomar a melhor decisão.
+    """
+    try:
+        data = request.json or {}
+        pedidos_input = data.get("pedidos", [])
+        entregadores_input = data.get("entregadores", [])
+
+        # Se não vier no corpo, busca do banco de dados local
+        if not pedidos_input:
+            conn = get_db_connection()
+            rows = conn.execute("SELECT * FROM pedidos WHERE status IN ('pronto', 'preparo', 'pendente')").fetchall()
+            pedidos_input = [dict(r) for r in rows]
+            conn.close()
+
+        if not entregadores_input:
+            conn = get_db_connection()
+            rows = conn.execute("SELECT * FROM entregadores").fetchall()
+            entregadores_input = [dict(r) for r in rows]
+            conn.close()
+
+        if not pedidos_input:
+            return jsonify({"status": "error", "message": "Nenhum pedido pendente ou pronto para roteirizar."}), 400
+
+        deepseek_key = os.getenv("DEEPSEEK_API_KEY", "")
+        if not deepseek_key:
+            print("[DEEPSEEK AI] AVISO: DEEPSEEK_API_KEY nao configurada no .env!")
+            return jsonify({
+                "status": "error",
+                "message": "DEEPSEEK_API_KEY não configurada no servidor."
+            }), 400
+
+
+        # Monta o prompt explicativo para o DeepSeek AI
+        prompt = f"""
+Você é o algoritmo central de inteligência e roteirização logística do sistema Voltz Delivery para restaurantes.
+Sua missão é criar o agrupamento ideal de pedidos para envio em lote (multi-stop delivery).
+
+**REGRAS LOGÍSTICAS OBRIGATÓRIAS:**
+1. Agrupe no máximo 3 a 4 pedidos por entregador (lote de rota).
+2. Priorize pedidos com maior tempo de espera (SLA mais antigo).
+3. Agrupe pedidos cujos endereços estejam no mesmo bairro ou em rota contínua na cidade de João Pessoa - PB (ex: Manaíra, Tambaú, Cabo Branco, Bessa, Pedro Gondim, Altiplano).
+4. Defina a ordem EXATA de entrega que minimize o tempo total de viagem do motoboy.
+
+**LOJA MATRIZ:** Filipéia Trattoria - Pedro Gondim, João Pessoa - PB (Lat: -7.1150, Lng: -34.8630)
+
+**LISTA DE PEDIDOS DISPONÍVEIS:**
+{json.dumps(pedidos_input, ensure_ascii=False, indent=2)}
+
+**LISTA DE ENTREGADORES DISPONÍVEIS:**
+{json.dumps(entregadores_input, ensure_ascii=False, indent=2)}
+
+Retorne a resposta EXCLUSIVAMENTE em formato JSON com o seguinte schema (sem markdown ou texto extra fora do JSON):
+{{
+  "raciocinio_ia": "Explicação clara e estratégica em português do porquê esse agrupamento e ordem foram definidos",
+  "grupos": [
+    {{
+      "entregador_sugerido": "Nome do Entregador ou 'A definir'",
+      "pedidos_ids": ["id_do_pedido1", "id_do_pedido2"],
+      "ordem_entrega": ["id_do_pedido1", "id_do_pedido2"],
+      "bairro_predominante": "Nome do Bairro",
+      "tempo_estimado_rota_min": 25
+    }}
+  ]
+}}
+"""
+
+        headers = {
+            "Authorization": f"Bearer {deepseek_key}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "system", "content": "Você é um assistente especialista em logística e inteligência geográfica de delivery que responde estritamente em formato JSON válido."},
+                {"role": "user", "content": prompt}
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0.2
+        }
+
+        print("[DEEPSEEK AI] Enviando dados para a API do DeepSeek para Roteirização Inteligente...")
+        res = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=payload, timeout=25)
+        
+        if res.status_code == 200:
+            result_data = res.json()
+            ai_message = result_data["choices"][0]["message"]["content"]
+            parsed_json = json.loads(ai_message)
+            print("[DEEPSEEK AI] Roteirização gerada com sucesso!")
+            return jsonify({
+                "status": "success",
+                "provedor": "DeepSeek AI v3",
+                "decisao_ia": parsed_json
+            }), 200
+        else:
+            print(f"[DEEPSEEK AI] Erro {res.status_code}: {res.text}")
+            return jsonify({
+                "status": "error",
+                "message": f"Erro na API do DeepSeek ({res.status_code}): {res.text}"
+            }), 500
+
+    except Exception as e:
+        print(f"[DEEPSEEK AI] Exceção: {e}")
+        return jsonify({"status": "error", "message": f"Falha ao executar roteirização por IA: {str(e)}"}), 500
+
+
 if __name__ == "__main__":
+
     port = int(os.getenv("FLASK_PORT", 5000))
     debug = os.getenv("FLASK_DEBUG", "True").lower() == "true"
     print(f"[OK] Servidor Flask rodando na porta {port} (Debug: {debug})...")

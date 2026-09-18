@@ -12,6 +12,9 @@ services:
     environment:
       - FLASK_PORT=5000
       - FLASK_DEBUG=False
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+
+
     volumes:
       - backend_data:/app/database
 

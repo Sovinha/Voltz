@@ -96,6 +96,8 @@ export const MapTab: React.FC = () => {
   const [selectedBatchIds, setSelectedBatchIds] = useState<string[]>([]);
   const [orderedBatch, setOrderedBatch] = useState<Pedido[]>([]);
   const [includeReturnLeg, setIncludeReturnLeg] = useState(true);
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const [aiReasoning, setAiReasoning] = useState<string | null>(null);
   const [batchMetrics, setBatchMetrics] = useState<{
     totalMin: number;
     deliveryMin: number;
@@ -103,6 +105,7 @@ export const MapTab: React.FC = () => {
     totalKm: number;
     returnKm: number;
   } | null>(null);
+
 
   // Configuração da Loja Matriz
   const [loja, setLoja] = useState<LojaConfig>({
@@ -232,20 +235,47 @@ export const MapTab: React.FC = () => {
     setShowBatchRoute(true);
   }, [selectedBatchIds, pedidos, loja]);
 
-  // Algoritmo Inteligente de Auto-Agrupamento Geográfico
-  const handleAutoGroup = () => {
+  // Algoritmo Inteligente de Roteirização com DeepSeek AI
+  const handleAutoGroup = async () => {
     const readyOrPreparing = pedidos.filter((p) => ['pronto', 'preparo', 'pendente'].includes(p.status));
     if (readyOrPreparing.length === 0) {
       alert('Nenhum pedido pendente, em preparo ou pronto para agrupar!');
       return;
     }
 
-    if (readyOrPreparing.length <= maxDeliveriesPerRun) {
-      setIsBatchMode(true);
-      setSelectedBatchIds(readyOrPreparing.map((p) => p.id));
-      return;
+    setIsAiLoading(true);
+    setAiReasoning(null);
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+
+    try {
+      const response = await fetch(`${backendUrl}/api/ai/roteirizar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pedidos: readyOrPreparing, entregadores }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.status === 'success' && data.decisao_ia) {
+          const aiDecision = data.decisao_ia;
+          setAiReasoning(aiDecision.raciocinio_ia || 'Rota otimizada via inteligência logística DeepSeek AI.');
+          
+          if (aiDecision.grupos && aiDecision.grupos.length > 0) {
+            const firstGroupIds = aiDecision.grupos[0].ordem_entrega || aiDecision.grupos[0].pedidos_ids || [];
+            if (firstGroupIds.length > 0) {
+              setIsBatchMode(true);
+              setSelectedBatchIds(firstGroupIds);
+              setIsAiLoading(false);
+              return;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[DeepSeek AI] Backend offline/erro, utilizando fallback geográfico local:', e);
     }
 
+    // Fallback Geográfico Local se AI estiver offline
     let bestCluster: Pedido[] = [];
     let minTotalDist = Infinity;
 
@@ -275,9 +305,12 @@ export const MapTab: React.FC = () => {
       }
     }
 
+    setAiReasoning('Rota agrupada por proximidade de bairros (Algoritmo Geográfico Local).');
     setIsBatchMode(true);
     setSelectedBatchIds(bestCluster.map((p) => p.id));
+    setIsAiLoading(false);
   };
+
 
   // Projeção do Horário de Retorno
   const getDriverReturnTimeString = (totalMin: number) => {
@@ -743,15 +776,28 @@ export const MapTab: React.FC = () => {
 
                 <button
                   onClick={handleAutoGroup}
-                  className="py-2 px-3 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs shadow-md transition-all flex items-center justify-center gap-1.5 hover:scale-102"
+                  disabled={isAiLoading}
+                  className="py-2 px-3 rounded-xl bg-gradient-to-r from-amber-500 to-purple-600 hover:from-amber-400 hover:to-purple-500 text-white font-extrabold text-xs shadow-md transition-all flex items-center justify-center gap-1.5 hover:scale-102 disabled:opacity-50"
                 >
-                  <Sparkles className="w-4 h-4 fill-slate-950" />
-                  <span>✨ Agrupar Próximos</span>
+                  <Sparkles className="w-4 h-4 fill-amber-300" />
+                  <span>{isAiLoading ? '🤖 DeepSeek Analisando...' : '🤖 Roteirizar com IA (DeepSeek)'}</span>
                 </button>
               </div>
 
+              {/* Banner de Raciocínio da IA DeepSeek */}
+              {aiReasoning && (
+                <div className="bg-purple-950/40 border border-purple-500/50 rounded-xl p-2.5 text-xs text-purple-200 shrink-0 animate-in fade-in space-y-1">
+                  <div className="flex items-center gap-1.5 font-bold text-purple-300 text-[11px]">
+                    <Sparkles className="w-3.5 h-3.5 fill-purple-400 text-purple-400" />
+                    <span>Decisão Inteligente DeepSeek AI:</span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-slate-300">{aiReasoning}</p>
+                </div>
+              )}
+
               {/* Barra de Seleção Rápida em Lote no Horário de Pico */}
               <div className="flex items-center justify-between bg-slate-950 px-2.5 py-1.5 rounded-xl border border-slate-800 text-[11px] shrink-0">
+
                 <button
                   onClick={() => {
                     const prontosIds = pedidos.filter(p => p.status === 'pronto').map(p => p.id);
