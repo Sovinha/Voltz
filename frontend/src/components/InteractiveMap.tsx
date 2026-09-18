@@ -296,6 +296,34 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     return () => clearInterval(interval);
   }, [isSimulating, singleOsrmPoints, batchOsrmPoints, showBatchRouteExternal, onSimulationEnd]);
 
+  const tileLayerRef = useRef<L.TileLayer | null>(null);
+  const [mapStyle, setMapStyle] = useState<'dark' | 'osm' | 'voyager' | 'satellite'>('dark');
+
+  const MAP_STYLES = {
+    dark: {
+      name: '🌙 Dark',
+      url: 'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+    },
+    osm: {
+      name: '🗺️ OpenStreetMap',
+      url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    },
+    voyager: {
+      name: '☀️ Voyager (Claro)',
+      url: 'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+    },
+    satellite: {
+      name: '🛰️ Satélite (Esri)',
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    },
+  };
+
+  useEffect(() => {
+    if (tileLayerRef.current) {
+      tileLayerRef.current.setUrl(MAP_STYLES[mapStyle].url);
+    }
+  }, [mapStyle]);
+
   // Inicialização do Mapa Leaflet
   useEffect(() => {
     if (!mapContainerRef.current) return;
@@ -309,12 +337,12 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
 
       L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
-        subdomains: 'abcd',
+      const tileLayer = L.tileLayer(MAP_STYLES.dark.url, {
+        attribution: '&copy; OpenStreetMap &copy; CARTO',
         maxZoom: 19,
       }).addTo(map);
 
+      tileLayerRef.current = tileLayer;
 
       layerGroupRef.current = L.layerGroup().addTo(map);
       mapInstanceRef.current = map;
@@ -327,6 +355,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
       }
     };
   }, []);
+
 
   // Renderização das Camadas no Mapa
   useEffect(() => {
@@ -648,7 +677,25 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
 
   return (
     <div className="relative w-full h-[calc(100vh-140px)] min-h-[600px] rounded-2xl overflow-hidden border border-slate-800 shadow-2xl z-0">
+      {/* Seletor de Modelo de Mapa (100% Grátis) */}
+      <div className="absolute top-3 left-3 z-[500] flex items-center gap-1 bg-slate-900/90 backdrop-blur-md p-1.5 rounded-xl border border-slate-700/60 shadow-xl">
+        {(Object.keys(MAP_STYLES) as Array<keyof typeof MAP_STYLES>).map((styleKey) => (
+          <button
+            key={styleKey}
+            onClick={() => setMapStyle(styleKey)}
+            className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all ${
+              mapStyle === styleKey
+                ? 'bg-amber-500 text-slate-950 shadow-md scale-105'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            {MAP_STYLES[styleKey].name}
+          </button>
+        ))}
+      </div>
+
       <div ref={mapContainerRef} className="w-full h-full bg-slate-950" />
     </div>
   );
 };
+

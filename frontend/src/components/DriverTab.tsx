@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Truck, MapPin, CheckCircle2, Navigation, ExternalLink, Clock, ShieldCheck, DollarSign, FileText, UserCheck, Coffee, X, Printer, LogOut, UserPlus } from 'lucide-react';
+import { Truck, MapPin, CheckCircle2, Navigation, ExternalLink, Clock, ShieldCheck, DollarSign, FileText, UserCheck, Coffee, X, Printer, LogOut, UserPlus, RotateCcw } from 'lucide-react';
+
 import { supabase, isSupabaseConfigured, Pedido } from '@/lib/supabase';
 import { OriginBadge } from './OriginBadge';
 import { DriverLoginView } from './DriverLoginView';
@@ -139,6 +140,20 @@ export const DriverTab: React.FC = () => {
     );
   }
 
+  const handleResetFrota = async () => {
+    if (!confirm('Deseja resetar o status de todos os motoboys para disponível e zerar entregas?')) return;
+    try {
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+      const res = await fetch(`${backendUrl}/api/entregadores/reset`, { method: 'POST' });
+      if (res.ok) {
+        alert('Frota de motoboys resetada com sucesso!');
+        fetchPedidosDriver();
+      }
+    } catch (e) {
+      alert('Erro ao resetar frota: ' + e);
+    }
+  };
+
   return (
     <div className="max-w-5xl mx-auto space-y-6 font-sans">
       {/* Header do Portal do Entregador Autenticado */}
@@ -160,12 +175,21 @@ export const DriverTab: React.FC = () => {
 
           <div className="flex items-center gap-2 flex-wrap">
             <button
+              onClick={handleResetFrota}
+              className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-400 font-bold text-xs border border-sky-500/30 transition-all flex items-center gap-1.5"
+            >
+              <RotateCcw className="w-4 h-4" />
+              <span>🔄 Resetar Frota</span>
+            </button>
+
+            <button
               onClick={() => setIsCadastroModalOpen(true)}
               className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 font-bold text-xs border border-amber-500/30 transition-all flex items-center gap-1.5"
             >
               <UserPlus className="w-4 h-4" />
               <span>➕ Cadastrar Motoqueiro</span>
             </button>
+
 
             <button
               onClick={() => setIsSettlementModalOpen(true)}

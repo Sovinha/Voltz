@@ -700,7 +700,18 @@ def realizar_fechamento_entregador(id_entregador):
     return jsonify(recibo), 200
 
 
+@app.route("/api/entregadores/reset", methods=["POST", "PUT"])
+def reset_entregadores_api():
+    """Reseta a frota de entregadores para o estado padrão (disponível, frete e entregas zeradas)."""
+    conn = get_db_connection()
+    conn.execute("UPDATE entregadores SET status = 'disponivel', frete_acumulado = 0.0, total_entregas = 0")
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "success", "message": "Frota de entregadores resetada com sucesso!"}), 200
+
+
 @app.route("/api/pedidos/reset", methods=["POST"])
+
 def reset_pedidos_api():
     """Reseta todos os pedidos e popula com os 3 pedidos oficiais (0121, 0123, 0122)."""
     conn = get_db_connection()
