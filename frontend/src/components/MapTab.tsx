@@ -251,7 +251,8 @@ export const MapTab: React.FC = () => {
       const response = await fetch(`${backendUrl}/api/ai/roteirizar`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pedidos: readyOrPreparing, entregadores }),
+        body: JSON.stringify({ pedidos: readyOrPreparing, entregadores: drivers }),
+
       });
 
       if (response.ok) {
