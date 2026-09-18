@@ -297,26 +297,27 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   }, [isSimulating, singleOsrmPoints, batchOsrmPoints, showBatchRouteExternal, onSimulationEnd]);
 
   const tileLayerRef = useRef<L.TileLayer | null>(null);
-  const [mapStyle, setMapStyle] = useState<'dark' | 'osm' | 'voyager' | 'satellite'>('dark');
+  const [mapStyle, setMapStyle] = useState<'dark' | 'osm' | 'streets' | 'satellite'>('osm');
 
   const MAP_STYLES = {
-    dark: {
-      name: '🌙 Dark',
-      url: 'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
-    },
     osm: {
       name: '🗺️ OpenStreetMap',
       url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
     },
-    voyager: {
-      name: '☀️ Voyager (Claro)',
-      url: 'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+    dark: {
+      name: '🌙 Dark (Esri)',
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    },
+    streets: {
+      name: '🏙️ Ruas Reais (Esri)',
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
     },
     satellite: {
-      name: '🛰️ Satélite (Esri)',
+      name: '🛰️ Satélite HD',
       url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     },
   };
+
 
   useEffect(() => {
     if (tileLayerRef.current) {
@@ -337,10 +338,11 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
 
       L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-      const tileLayer = L.tileLayer(MAP_STYLES.dark.url, {
-        attribution: '&copy; OpenStreetMap &copy; CARTO',
+      const tileLayer = L.tileLayer(MAP_STYLES.osm.url, {
+        attribution: '&copy; OpenStreetMap contributors',
         maxZoom: 19,
       }).addTo(map);
+
 
       tileLayerRef.current = tileLayer;
 
@@ -678,7 +680,8 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   return (
     <div className="relative w-full h-[calc(100vh-140px)] min-h-[600px] rounded-2xl overflow-hidden border border-slate-800 shadow-2xl z-0">
       {/* Seletor de Modelo de Mapa (100% Grátis) */}
-      <div className="absolute top-3 left-3 z-[500] flex items-center gap-1 bg-slate-900/90 backdrop-blur-md p-1.5 rounded-xl border border-slate-700/60 shadow-xl">
+      <div className="absolute top-3 left-64 z-[500] flex items-center gap-1 bg-slate-900/95 backdrop-blur-md p-1.5 rounded-xl border border-slate-700/60 shadow-2xl">
+
         {(Object.keys(MAP_STYLES) as Array<keyof typeof MAP_STYLES>).map((styleKey) => (
           <button
             key={styleKey}
