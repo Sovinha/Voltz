@@ -809,14 +809,19 @@ def ai_roteirizar_pedidos():
 
         # Monta o prompt explicativo para o DeepSeek AI
         prompt = f"""
-Você é o algoritmo central de inteligência e roteirização logística do sistema Voltz Delivery para restaurantes.
+Você é o algoritmo central de inteligência e roteirização logística do sistema Voltz Delivery.
 Sua missão é criar o agrupamento ideal de pedidos para envio em lote (multi-stop delivery).
 
-**REGRAS LOGÍSTICAS OBRIGATÓRIAS:**
+**REGRA CRÍTICA DE FORMATAÇÃO E RESUMO:**
+- O campo "raciocinio_ia" DEVE SER EXTREMAMENTE RESUMIDO E DIRETO AO PONTO (no máximo 1 a 2 frases curtas com emojis).
+- Exemplo do formato exato desejado: "📍 Lote Brisamar (~1km) | 🛵 Motoboy: ANDERSON | ⚡ Ordem: #127 ➔ #126 (trajeto contínuo mais rápido)."
+- PROIBIDO escrever textos longos ou parágrafos. Seja ultra conciso!
+
+**REGRAS LOGÍSTICAS:**
 1. Agrupe no máximo 3 a 4 pedidos por entregador (lote de rota).
-2. Priorize pedidos com maior tempo de espera (SLA mais antigo).
-3. Agrupe pedidos cujos endereços estejam no mesmo bairro ou em rota contínua na cidade de João Pessoa - PB (ex: Manaíra, Tambaú, Cabo Branco, Bessa, Pedro Gondim, Altiplano).
-4. Defina a ordem EXATA de entrega que minimize o tempo total de viagem do motoboy.
+2. Priorize pedidos com maior tempo de espera (SLA).
+3. Agrupe pedidos no mesmo bairro ou em rota contínua em João Pessoa - PB.
+4. Defina a ordem exata de entrega que minimize a viagem.
 
 **LOJA MATRIZ:** Filipéia Trattoria - Pedro Gondim, João Pessoa - PB (Lat: -7.1150, Lng: -34.8630)
 
@@ -826,9 +831,9 @@ Sua missão é criar o agrupamento ideal de pedidos para envio em lote (multi-st
 **LISTA DE ENTREGADORES DISPONÍVEIS:**
 {json.dumps(entregadores_input, ensure_ascii=False, indent=2)}
 
-Retorne a resposta EXCLUSIVAMENTE em formato JSON com o seguinte schema (sem markdown ou texto extra fora do JSON):
+Retorne a resposta EXCLUSIVAMENTE em formato JSON (sem markdown ou texto fora do JSON):
 {{
-  "raciocinio_ia": "Explicação clara e estratégica em português do porquê esse agrupamento e ordem foram definidos",
+  "raciocinio_ia": "📍 Lote Bairro (~Xkm) | 🛵 Motoboy: NOME | ⚡ Ordem: #ID1 ➔ #ID2 (resumo ultra conciso em 1 frase)",
   "grupos": [
     {{
       "entregador_sugerido": "Nome do Entregador ou 'A definir'",
@@ -840,6 +845,7 @@ Retorne a resposta EXCLUSIVAMENTE em formato JSON com o seguinte schema (sem mar
   ]
 }}
 """
+
 
         headers = {
             "Authorization": f"Bearer {deepseek_key}",
