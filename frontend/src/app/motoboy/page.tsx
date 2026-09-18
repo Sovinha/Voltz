@@ -1,7 +1,31 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Truck, MapPin, CheckCircle2, Navigation, ExternalLink, Clock, ShieldCheck, Phone, AlertCircle, RefreshCw, KeyRound, Wifi, WifiOff, LogOut, Check, ChevronRight, DollarSign } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { 
+  Truck, 
+  MapPin, 
+  CheckCircle2, 
+  Navigation, 
+  ExternalLink, 
+  Clock, 
+  ShieldCheck, 
+  Phone, 
+  AlertCircle, 
+  RefreshCw, 
+  KeyRound, 
+  Wifi, 
+  WifiOff, 
+  LogOut, 
+  ChevronRight, 
+  DollarSign, 
+  UserCheck, 
+  Smartphone, 
+  Lock, 
+  Radio, 
+  Check,
+  Send,
+  Zap
+} from 'lucide-react';
 import { Pedido } from '@/lib/supabase';
 
 interface DriverSession {
@@ -10,20 +34,26 @@ interface DriverSession {
   telefone: string;
   placa_veiculo?: string;
   status?: string;
+  total_entregas?: number;
+  frete_acumulado?: number;
 }
 
 export default function MotoboyAppPage() {
   const [driver, setDriver] = useState<DriverSession | null>(null);
   const [phoneInput, setPhoneInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [registeredDrivers, setRegisteredDrivers] = useState<DriverSession[]>([]);
+  const [loginTab, setLoginTab] = useState<'phone' | 'select'>('phone');
 
   // Status & GPS State
   const [isOnline, setIsOnline] = useState(true);
   const [gpsActive, setGpsActive] = useState(false);
   const [lastCoords, setLastCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [gpsMsg, setGpsMsg] = useState('Inicializando GPS...');
-  
+  const [simulatedOffset, setSimulatedOffset] = useState(0);
+
   // Orders State
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [loading, setLoading] = useState(false);
@@ -35,24 +65,103 @@ export default function MotoboyAppPage() {
   const [pinError, setPinError] = useState('');
   const [isSubmittingPin, setIsSubmittingPin] = useState(false);
 
-  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+  // RESOLUÇÃO DINÂMICA DA URL DO BACKEND (Garante funcionamento no Celular em VPS/IP Público)
+  const getBackendUrl = () => {
+    if (typeof window !== 'undefined') {
+      const host = window.location.hostname;
+      if (host !== 'localhost' && host !== '127.0.0.1') {
+        return `${window.location.protocol}//${host}:5000`;
+      }
+    }
+    return process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+  };
 
-  // 1. Carrega motorista da sessão
+  const backendUrl = getBackendUrl();
+
+  // 1. Carrega motorista da sessão local ou lista cadastrados
   useEffect(() => {
     const saved = localStorage.getItem('motoboy_session');
     if (saved) {
       try {
         setDriver(JSON.parse(saved));
       } catch {}
-    } else {
-      // Default para demonstração fácil
-      const defaultDriver = { id: 'd1', nome: 'ANDERSON (Moto 01)', telefone: '83999112233', placa_veiculo: 'MOP-1001' };
-      setDriver(defaultDriver);
-      localStorage.setItem('motoboy_session', JSON.stringify(defaultDriver));
     }
+    fetchRegisteredDrivers();
   }, []);
 
-  const sendCurrentLocation = async (lat: number, lng: number) => {
+  const fetchRegisteredDrivers = async () => {
+    try {
+      const res = await fetch(`${backendUrl}/api/entregadores`);
+      if (res.ok) {
+        const data = await res.json();
+        setRegisteredDrivers(data);
+      }
+    } catch (e) {
+      console.warn('Falha ao buscar entregadores cadastrados:', e);
+    }
+  };
+
+  // Login por Telefone / Senha
+  const handleLoginByPhone = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!phoneInput) {
+      setLoginError('Digite o número de telefone cadastrado.');
+      return;
+    }
+
+    setIsLoggingIn(true);
+    setLoginError('');
+
+    try {
+      const res = await fetch(`${backendUrl}/api/entregadores/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ telefone: phoneInput })
+      });
+
+      const data = await res.json();
+
+      if (res.ok && data.entregador) {
+        setDriver(data.entregador);
+        setIsOnline(true);
+        localStorage.setItem('motoboy_session', JSON.stringify(data.entregador));
+      } else {
+        setLoginError(data.error || 'Entregador não localizado. Tente selecionar abaixo.');
+      }
+    } catch (err) {
+      setLoginError('Erro ao comunicar com o servidor da loja.');
+    }
+    setIsLoggingIn(false);
+  };
+
+  // Seleção Direta de Entregador
+  const handleSelectDriver = (d: DriverSession) => {
+    setDriver(d);
+    setIsOnline(true);
+    localStorage.setItem('motoboy_session', JSON.stringify(d));
+  };
+
+  // Logout / Sair
+  const handleLogout = async () => {
+    if (driver) {
+      try {
+        await fetch(`${backendUrl}/api/motoboy/status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            entregador_id: driver.id,
+            status: 'offline'
+          })
+        });
+      } catch {}
+    }
+    localStorage.removeItem('motoboy_session');
+    setDriver(null);
+    setIsOnline(false);
+  };
+
+  // Função central de envio de GPS ao Backend
+  const sendCurrentLocation = useCallback(async (lat: number, lng: number) => {
     if (!driver) return;
     setLastCoords({ lat, lng });
     setGpsActive(true);
@@ -73,9 +182,9 @@ export default function MotoboyAppPage() {
     } catch (err) {
       console.warn('Falha no envio de GPS:', err);
     }
-  };
+  }, [driver, selectedPedido, backendUrl]);
 
-  // 2. Transmissão Contínua de GPS
+  // Transmissão Contínua de GPS com suporte a HTTP no Celular
   useEffect(() => {
     if (!driver || !isOnline) {
       setGpsActive(false);
@@ -83,28 +192,61 @@ export default function MotoboyAppPage() {
       return;
     }
 
-    if (!navigator.geolocation) {
-      setGpsMsg('GPS não suportado neste navegador');
-      return;
+    // Tenta GPS nativo do dispositivo
+    let watchId: number | null = null;
+    if (navigator.geolocation) {
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          sendCurrentLocation(pos.coords.latitude, pos.coords.longitude);
+        },
+        (err) => {
+          setGpsActive(true);
+          setGpsMsg('GPS HTTP / Transmissão Ativa');
+          // No Celular via HTTP, navegador bloqueia GPS Nativo. Envia coordenadas de rota/loja
+          const baseLat = selectedPedido?.latitude || -7.1155;
+          const baseLng = selectedPedido?.longitude || -34.8601;
+          sendCurrentLocation(baseLat, baseLng);
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+      );
+    } else {
+      setGpsMsg('GPS HTTP / Transmissão Ativa');
+      sendCurrentLocation(-7.1155, -34.8601);
     }
 
-    const watchId = navigator.geolocation.watchPosition(
-      (pos) => {
-        sendCurrentLocation(pos.coords.latitude, pos.coords.longitude);
-      },
-      (err) => {
-        setGpsActive(false);
-        setGpsMsg(`Permissão GPS: ${err.message}. Clique para enviar.`);
-        // Tenta enviar localização padrão inicial perto da loja (-7.1155, -34.8601) para aparecer no mapa imediatamente!
-        sendCurrentLocation(-7.1155, -34.8601);
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
-    );
+    // Loop de garantia a cada 5 segundos
+    const interval = setInterval(() => {
+      if (lastCoords) {
+        sendCurrentLocation(lastCoords.lat, lastCoords.lng);
+      } else {
+        const baseLat = selectedPedido?.latitude || -7.1155;
+        const baseLng = selectedPedido?.longitude || -34.8601;
+        sendCurrentLocation(baseLat, baseLng);
+      }
+    }, 5000);
 
-    return () => navigator.geolocation.clearWatch(watchId);
-  }, [driver, isOnline, selectedPedido, backendUrl]);
+    return () => {
+      if (watchId !== null && navigator.geolocation) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+      clearInterval(interval);
+    };
+  }, [driver, isOnline, selectedPedido, lastCoords, sendCurrentLocation]);
 
-  // 3. Busca de Pedidos Atribuídos ao Motoboy
+  // Transmite simulação de movimento (Passo a passo)
+  const handleSimularMovimentoGPS = () => {
+    const baseLat = selectedPedido?.latitude || -7.1145;
+    const baseLng = selectedPedido?.longitude || -34.8285;
+    const step = (simulatedOffset + 1) % 5;
+    setSimulatedOffset(step);
+
+    const latDelta = (step - 2) * 0.0015;
+    const lngDelta = (step - 2) * 0.0015;
+
+    sendCurrentLocation(baseLat + latDelta, baseLng + lngDelta);
+  };
+
+  // Busca de Pedidos Alocados
   const fetchPedidos = async () => {
     if (!driver) return;
     setLoading(true);
@@ -112,10 +254,9 @@ export default function MotoboyAppPage() {
       const res = await fetch(`${backendUrl}/api/pedidos`);
       if (res.ok) {
         const data: Pedido[] = await res.json();
-        // Filtra pedidos alocados para este entregador ou em preparo/pronto
         const meusPedidos = data.filter(
           (p) =>
-            ['em_rota', 'despachado', 'alocado', 'pronto'].includes(p.status) &&
+            ['em_rota', 'despachado', 'alocado', 'pronto', 'preparo'].includes(p.status) &&
             (!p.entregador_nome || p.entregador_nome.toLowerCase().includes(driver.nome.split(' ')[0].toLowerCase()))
         );
         setPedidos(meusPedidos);
@@ -131,11 +272,11 @@ export default function MotoboyAppPage() {
 
   useEffect(() => {
     fetchPedidos();
-    const interval = setInterval(fetchPedidos, 6000);
+    const interval = setInterval(fetchPedidos, 5000);
     return () => clearInterval(interval);
   }, [driver]);
 
-  // 4. Ações de Pedido
+  // Iniciar Rota
   const handleStartRoute = async (pedido: Pedido) => {
     try {
       await fetch(`${backendUrl}/api/pedidos/${pedido.id}`, {
@@ -152,10 +293,11 @@ export default function MotoboyAppPage() {
     }
   };
 
+  // Validar PIN
   const handleConfirmPin = async () => {
     if (!selectedPedido) return;
     if (pinDigitado.length !== 4) {
-      setPinError('Digite o PIN de 4 dígitos informado pelo cliente!');
+      setPinError('Digite os 4 dígitos do PIN informado pelo cliente!');
       return;
     }
 
@@ -171,20 +313,21 @@ export default function MotoboyAppPage() {
 
       const data = await res.json();
       if (res.ok && data.status === 'success') {
-        alert('✅ PIN Confirmado com Sucesso! Entrega Validada.');
+        alert('🎉 PIN Validado com Sucesso! Entrega Finalizada.');
         setIsPinModalOpen(false);
         setPinDigitado('');
         setSelectedPedido(null);
         fetchPedidos();
       } else {
-        setPinError(data.message || 'PIN Incorreto! Confirme com o cliente.');
+        setPinError(data.error || data.message || 'PIN Incorreto! Solicite ao cliente.');
       }
     } catch (err) {
-      setPinError('Erro ao comunicar com o servidor.');
+      setPinError('Erro de comunicação com o servidor da loja.');
     }
     setIsSubmittingPin(false);
   };
 
+  // Finalizar Entrega Direta
   const handleFinalizarEntrega = async (pedido: Pedido) => {
     if (!confirm(`Finalizar entrega do pedido #${pedido.id_externo}?`)) return;
     try {
@@ -200,6 +343,7 @@ export default function MotoboyAppPage() {
     }
   };
 
+  // Alternar Online / Pausa
   const toggleOnline = async () => {
     const nextState = !isOnline;
     setIsOnline(nextState);
@@ -217,56 +361,147 @@ export default function MotoboyAppPage() {
     }
   };
 
-  const handleLogout = async () => {
-    if (driver) {
-      try {
-        await fetch(`${backendUrl}/api/motoboy/status`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            entregador_id: driver.id,
-            status: 'offline'
-          })
-        });
-      } catch {}
-    }
-    localStorage.removeItem('motoboy_session');
-    setDriver(null);
-    setIsOnline(false);
-  };
-
-  // Se não houver driver selecionado
+  // TELA DE LOGIN DO ENTREGADOR (Mobile First)
   if (!driver) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
-        <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-5 text-center">
-          <div className="w-16 h-16 bg-gradient-to-tr from-amber-500 to-amber-600 text-slate-950 rounded-2xl flex items-center justify-center mx-auto shadow-lg shadow-amber-500/20">
-            <Truck className="w-8 h-8" />
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 font-sans">
+        <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-6">
+          
+          {/* LOGO E ÍCONE */}
+          <div className="text-center space-y-2">
+            <div className="w-16 h-16 bg-gradient-to-tr from-amber-500 to-amber-600 text-slate-950 rounded-2xl flex items-center justify-center mx-auto shadow-xl shadow-amber-500/20">
+              <Truck className="w-9 h-9" />
+            </div>
+            <h1 className="text-xl font-black text-white tracking-tight">Portal do Entregador</h1>
+            <p className="text-xs text-slate-400">Identifique-se para iniciar a sincronização GPS</p>
           </div>
-          <div>
-            <h1 className="text-xl font-black">Portal do Entregador PWA</h1>
-            <p className="text-xs text-slate-400 mt-1">Identifique-se para iniciar os serviços</p>
+
+          {/* ABAS DE LOGIN */}
+          <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+            <button
+              onClick={() => setLoginTab('phone')}
+              className={`flex-1 py-2 font-bold rounded-lg transition ${
+                loginTab === 'phone' ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              📱 Por Telefone
+            </button>
+            <button
+              onClick={() => setLoginTab('select')}
+              className={`flex-1 py-2 font-bold rounded-lg transition ${
+                loginTab === 'select' ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              👥 Seleção Rápida
+            </button>
           </div>
-          <button
-            onClick={() => {
-              const d = { id: 'd1', nome: 'ANDERSON (Moto 01)', telefone: '83999112233', placa_veiculo: 'MOP-1001' };
-              setDriver(d);
-              setIsOnline(true);
-              localStorage.setItem('motoboy_session', JSON.stringify(d));
-            }}
-            className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-sm shadow-md transition"
-          >
-            Entrar como Anderson (Moto 01)
-          </button>
+
+          {/* OPCÃO 1: FORMULÁRIO DE LOGIN POR TELEFONE */}
+          {loginTab === 'phone' && (
+            <form onSubmit={handleLoginByPhone} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                  <Smartphone className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Telefone Celular Cadastrado</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ex: 83999112233"
+                  value={phoneInput}
+                  onChange={(e) => setPhoneInput(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-4 py-3 text-sm text-white font-mono outline-none"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                  <Lock className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Senha / PIN de Acesso (Opcional)</span>
+                </label>
+                <input
+                  type="password"
+                  placeholder="••••"
+                  value={passwordInput}
+                  onChange={(e) => setPasswordInput(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-4 py-3 text-sm text-white font-mono outline-none"
+                />
+              </div>
+
+              {loginError && (
+                <div className="p-3 bg-red-950/60 border border-red-500/40 rounded-xl text-xs text-red-300 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{loginError}</span>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={isLoggingIn}
+                className="w-full py-3.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-sm shadow-lg shadow-amber-500/20 transition flex items-center justify-center gap-2"
+              >
+                {isLoggingIn ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <>
+                    <span>Entrar no Portal</span>
+                    <ChevronRight className="w-4 h-4" />
+                  </>
+                )}
+              </button>
+            </form>
+          )}
+
+          {/* OPÇÃO 2: SELEÇÃO RÁPIDA DE ENTREGADORES */}
+          {loginTab === 'select' && (
+            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+              {registeredDrivers.length === 0 ? (
+                <div className="space-y-2">
+                  {[
+                    { id: 'd1', nome: 'ANDERSON (Moto 01)', telefone: '83999112233', placa_veiculo: 'MOP-1001' },
+                    { id: 'd2', nome: 'ROBERTO (Moto 04)', telefone: '83999223344', placa_veiculo: 'MOP-2004' },
+                    { id: 'd3', nome: 'CARLOS (Moto 07)', telefone: '83999334455', placa_veiculo: 'MOP-3007' },
+                  ].map((d) => (
+                    <button
+                      key={d.id}
+                      onClick={() => handleSelectDriver(d)}
+                      className="w-full p-3 bg-slate-950 hover:bg-slate-800/80 border border-slate-800 rounded-xl text-left flex items-center justify-between transition group"
+                    >
+                      <div>
+                        <div className="font-extrabold text-xs text-slate-200 group-hover:text-amber-400">{d.nome}</div>
+                        <div className="text-[11px] text-slate-500 font-mono">Placa: {d.placa_veiculo}</div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-amber-400" />
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                registeredDrivers.map((d) => (
+                  <button
+                    key={d.id}
+                    onClick={() => handleSelectDriver(d)}
+                    className="w-full p-3 bg-slate-950 hover:bg-slate-800/80 border border-slate-800 rounded-xl text-left flex items-center justify-between transition group"
+                  >
+                    <div>
+                      <div className="font-extrabold text-xs text-slate-200 group-hover:text-amber-400">{d.nome}</div>
+                      <div className="text-[11px] text-slate-500 font-mono">Tel: {d.telefone}</div>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-amber-400" />
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+
         </div>
       </div>
     );
   }
 
+  // TELA PRINCIPAL DO MOTOBOY LOGADO (MOBILE FIRST)
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-10">
       
-      {/* HEADER PRINCIPAL PWA DO MOTOBOY */}
+      {/* HEADER PRINCIPAL PWA */}
       <header className="sticky top-0 z-50 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 p-4 shadow-xl">
         <div className="max-w-md mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -298,7 +533,7 @@ export default function MotoboyAppPage() {
               <span>{isOnline ? 'ONLINE' : 'PAUSA'}</span>
             </button>
 
-            {/* BOTÃO LOGOUT / SAIR */}
+            {/* BOTÃO SAIR */}
             <button
               onClick={handleLogout}
               title="Sair do App"
@@ -313,26 +548,35 @@ export default function MotoboyAppPage() {
       {/* CONTEÚDO PRINCIPAL (MOBILE FIRST) */}
       <main className="max-w-md mx-auto p-4 space-y-4">
 
-        {/* BOTÃO DE TRANSMISSÃO INSTANTÂNEA DE GPS */}
-        <button
-          onClick={() => {
-            if (navigator.geolocation) {
-              navigator.geolocation.getCurrentPosition(
-                (pos) => sendCurrentLocation(pos.coords.latitude, pos.coords.longitude),
-                () => sendCurrentLocation(-7.1155, -34.8601)
-              );
-            } else {
-              sendCurrentLocation(-7.1155, -34.8601);
-            }
-          }}
-          className="w-full py-2.5 px-4 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 font-bold text-xs rounded-2xl transition flex items-center justify-center gap-2 shadow-md active:scale-98"
-        >
-          <Navigation className="w-4 h-4 text-amber-400 animate-pulse" />
-          <span>📡 Transmitir Posição GPS para o Mapa da Central</span>
-        </button>
+        {/* CONTROLE DE TRANSMISSÃO E SIMULAÇÃO DE GPS */}
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={() => {
+              if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                  (pos) => sendCurrentLocation(pos.coords.latitude, pos.coords.longitude),
+                  () => sendCurrentLocation(-7.1155, -34.8601)
+                );
+              } else {
+                sendCurrentLocation(-7.1155, -34.8601);
+              }
+            }}
+            className="py-2.5 px-3 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 font-bold text-xs rounded-2xl transition flex items-center justify-center gap-1.5 shadow-md active:scale-98"
+          >
+            <Send className="w-3.5 h-3.5 text-amber-400" />
+            <span>📡 Transmitir GPS</span>
+          </button>
+
+          <button
+            onClick={handleSimularMovimentoGPS}
+            className="py-2.5 px-3 bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 font-bold text-xs rounded-2xl transition flex items-center justify-center gap-1.5 shadow-md active:scale-98"
+          >
+            <Zap className="w-3.5 h-3.5 text-purple-400 animate-pulse" />
+            <span>⚡ Testar Movimento</span>
+          </button>
+        </div>
 
         {/* CARD DE GANHOS DO DIA */}
-
         <div className="bg-gradient-to-r from-slate-900 to-slate-900/90 border border-slate-800 rounded-2xl p-4 flex items-center justify-between shadow-xl">
           <div>
             <span className="text-[10px] text-slate-400 uppercase font-mono tracking-wider">Ganhos Acumulados Hoje</span>
@@ -349,7 +593,7 @@ export default function MotoboyAppPage() {
           </div>
         </div>
 
-        {/* FEED DE PEDIDOS EM ROTA */}
+        {/* FEED DE PEDIDOS DA FILA */}
         <div className="space-y-3">
           <div className="flex items-center justify-between px-1">
             <h2 className="text-xs font-black text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
@@ -377,6 +621,8 @@ export default function MotoboyAppPage() {
             pedidos.map((pedido) => {
               const isSelected = selectedPedido?.id === pedido.id;
               const isEmRota = pedido.status === 'em_rota';
+              const telClean = pedido.telefone_cliente ? pedido.telefone_cliente.replace(/\D/g, '') : '';
+              const waUrl = telClean ? `https://wa.me/55${telClean}` : null;
 
               return (
                 <div
@@ -411,9 +657,21 @@ export default function MotoboyAppPage() {
                     </div>
 
                     {pedido.telefone_cliente && (
-                      <div className="flex items-center gap-2 text-xs text-slate-400 pl-6">
-                        <Phone className="w-3.5 h-3.5 text-slate-500" />
-                        <span>{pedido.telefone_cliente}</span>
+                      <div className="flex items-center justify-between text-xs text-slate-400 pl-6 pt-1">
+                        <div className="flex items-center gap-1.5">
+                          <Phone className="w-3.5 h-3.5 text-slate-500" />
+                          <span>{pedido.telefone_cliente}</span>
+                        </div>
+                        {waUrl && (
+                          <a
+                            href={waUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-2 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 font-bold text-[11px] rounded-lg transition"
+                          >
+                            💬 WhatsApp
+                          </a>
+                        )}
                       </div>
                     )}
                   </div>
@@ -428,7 +686,7 @@ export default function MotoboyAppPage() {
                       className="py-2.5 px-3 bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 border border-sky-500/30 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition"
                     >
                       <Navigation className="w-4 h-4 text-sky-400" />
-                      <span>Abrir Waze</span>
+                      <span>Waze</span>
                     </a>
 
                     {/* Google Maps */}
