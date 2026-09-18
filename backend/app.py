@@ -95,9 +95,22 @@ def init_local_db():
             status TEXT NOT NULL DEFAULT 'disponivel',
             total_entregas INTEGER NOT NULL DEFAULT 0,
             frete_acumulado REAL NOT NULL DEFAULT 0.0,
+            latitude REAL,
+            longitude REAL,
+            last_seen TEXT,
             created_at TEXT NOT NULL
         )
     """)
+
+    cursor.execute("PRAGMA table_info(entregadores)")
+    existing_driver_cols = [r[1] for r in cursor.fetchall()]
+    for col_name, col_type in [("latitude", "REAL"), ("longitude", "REAL"), ("last_seen", "TEXT")]:
+        if col_name not in existing_driver_cols:
+            try:
+                cursor.execute(f"ALTER TABLE entregadores ADD COLUMN {col_name} {col_type}")
+            except Exception as e:
+                pass
+
 
     cursor.execute("SELECT COUNT(*) FROM entregadores")
     if cursor.fetchone()[0] == 0:
@@ -563,12 +576,25 @@ def atualizar_localizacao_motoboy():
         return jsonify({"error": "Latitude e Longitude são obrigatórias"}), 400
 
     conn = get_db_connection()
+    now_str = datetime.now().isoformat()
+    entregador_nome = data.get("entregador_nome")
+    search_key = entregador_id or entregador_nome
+
+    # Atualiza localização do entregador no cadastro de entregadores
+    if search_key:
+        conn.execute("""
+            UPDATE entregadores 
+            SET latitude = ?, longitude = ?, last_seen = ?, status = CASE WHEN status = 'pausa' THEN 'pausa' ELSE 'disponivel' END
+            WHERE id = ? OR nome LIKE ?
+        """, (lat, lng, now_str, search_key, f"%{search_key}%"))
+
     if pedido_id:
         rows = conn.execute("SELECT * FROM pedidos WHERE (id = ? OR id_externo = ?) AND status = 'em_rota'", (pedido_id, pedido_id)).fetchall()
-    elif entregador_id:
-        rows = conn.execute("SELECT * FROM pedidos WHERE entregador_id = ? AND status = 'em_rota'", (entregador_id,)).fetchall()
+    elif search_key:
+        rows = conn.execute("SELECT * FROM pedidos WHERE (entregador_id = ? OR entregador_nome LIKE ?) AND status = 'em_rota'", (search_key, f"%{search_key}%")).fetchall()
     else:
         rows = conn.execute("SELECT * FROM pedidos WHERE status = 'em_rota'").fetchall()
+
 
     alertas_disparados = []
 

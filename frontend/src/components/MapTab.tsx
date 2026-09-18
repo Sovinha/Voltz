@@ -145,7 +145,10 @@ export const MapTab: React.FC = () => {
 
   useEffect(() => {
     fetchDrivers();
+    const interval = setInterval(fetchDrivers, 3500);
+    return () => clearInterval(interval);
   }, []);
+
 
   const getLocalOrders = (): Pedido[] => {
     try {
@@ -709,7 +712,9 @@ export const MapTab: React.FC = () => {
             <InteractiveMap
               loja={loja}
               pedidos={pedidos}
+              drivers={drivers}
               selectedPedido={selectedPedido}
+
               selectedStatusFilter={statusFilter}
               batchPedidos={orderedBatch}
               includeReturnLeg={includeReturnLeg}

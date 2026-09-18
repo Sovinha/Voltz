@@ -5,6 +5,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Pedido, OrdemStatus } from '@/lib/supabase';
 import { checkIsPeakHour } from '@/lib/DispatchEngine';
+import { DriverData } from './CadastroMotoboyModal';
 
 export interface LojaConfig {
   nome: string;
@@ -16,7 +17,9 @@ export interface LojaConfig {
 interface InteractiveMapProps {
   loja: LojaConfig;
   pedidos: Pedido[];
+  drivers?: DriverData[];
   selectedPedido: Pedido | null;
+
   selectedStatusFilter?: string;
   batchPedidos?: Pedido[];
   includeReturnLeg?: boolean;
@@ -83,7 +86,9 @@ const generateGridStreetPath = (points: [number, number][]): [number, number][] 
 export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   loja,
   pedidos,
+  drivers = [],
   selectedPedido,
+
   selectedStatusFilter = 'todos',
   batchPedidos = [],
   includeReturnLeg = true,
@@ -656,7 +661,36 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
       }
     }
 
-    // 7. Animação de Deslocamento do Motoboy Percorrendo as Ruas Reais
+    // 7. Renderização dos Motoboys com GPS Ao Vivo Transmitido via Celular PWA
+    if (drivers && drivers.length > 0) {
+      drivers.forEach((d) => {
+        if (d.latitude && d.longitude) {
+          const isOnline = d.status !== 'offline' && d.status !== 'pausa';
+          const driverIcon = L.divIcon({
+            className: 'custom-driver-marker',
+            html: `
+              <div class="flex flex-col items-center">
+                <div class="px-2.5 py-0.5 rounded-full bg-slate-900/95 text-amber-300 font-black text-[10px] border border-amber-500/50 shadow-2xl whitespace-nowrap mb-1">
+                  🛵 ${d.nome.split(' ')[0]} ${isOnline ? '🟢' : '🔴'}
+                </div>
+                <div class="w-10 h-10 rounded-full bg-amber-500 text-slate-950 font-black flex items-center justify-center border-2 border-white shadow-2xl animate-bounce">
+                  <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M19 7c0-1.1-.9-2-2-2h-3v2h3v2.65L13.52 14H10V9H6c-1.1 0-2 .9-2 2v3H0v2h4c0 2.21 1.79 4 4 4s4-1.79 4-4h4c0 2.21 1.79 4 4 4s4-1.79 4-4h4v-5l-5-5zM8 18c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm10 0c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/>
+                  </svg>
+                </div>
+              </div>
+            `,
+            iconSize: [60, 60],
+            iconAnchor: [30, 55],
+          });
+
+          const driverMarker = L.marker([d.latitude, d.longitude], { icon: driverIcon });
+          layerGroup.addLayer(driverMarker);
+        }
+      });
+    }
+
+    // 8. Animação de Deslocamento de Rota Ativa
     const activeBikeCoords = currentBikeCoords || animatingCoords;
     if (activeBikeCoords) {
       const bikeIcon = L.divIcon({
@@ -675,7 +709,8 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
       const bikeMarker = L.marker([activeBikeCoords.lat, activeBikeCoords.lng], { icon: bikeIcon });
       layerGroup.addLayer(bikeMarker);
     }
-  }, [loja, pedidos, selectedPedido, selectedStatusFilter, batchPedidos, animatingCoords, currentBikeCoords, singleOsrmPoints, batchOsrmPoints, osrmEtaInfo, showEtaBadge, showSingleRouteExternal, showBatchRouteExternal, onSelectPedido, onUpdateStatus, onOpenAlocar, onOpenDetails]);
+  }, [loja, pedidos, drivers, selectedPedido, selectedStatusFilter, batchPedidos, animatingCoords, currentBikeCoords, singleOsrmPoints, batchOsrmPoints, osrmEtaInfo, showEtaBadge, showSingleRouteExternal, showBatchRouteExternal, onSelectPedido, onUpdateStatus, onOpenAlocar, onOpenDetails]);
+
 
   return (
     <div className="relative w-full h-[calc(100vh-140px)] min-h-[600px] rounded-2xl overflow-hidden border border-slate-800 shadow-2xl z-0">

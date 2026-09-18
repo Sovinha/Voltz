@@ -52,6 +52,29 @@ export default function MotoboyAppPage() {
     }
   }, []);
 
+  const sendCurrentLocation = async (lat: number, lng: number) => {
+    if (!driver) return;
+    setLastCoords({ lat, lng });
+    setGpsActive(true);
+    setGpsMsg(`GPS Transmitido (${lat.toFixed(4)}, ${lng.toFixed(4)})`);
+
+    try {
+      await fetch(`${backendUrl}/api/motoboy/localizacao`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          entregador_id: driver.id,
+          entregador_nome: driver.nome,
+          latitude: lat,
+          longitude: lng,
+          pedido_id: selectedPedido?.id
+        }),
+      });
+    } catch (err) {
+      console.warn('Falha no envio de GPS:', err);
+    }
+  };
+
   // 2. Transmissão Contínua de GPS
   useEffect(() => {
     if (!driver || !isOnline) {
@@ -61,38 +84,19 @@ export default function MotoboyAppPage() {
     }
 
     if (!navigator.geolocation) {
-      setGpsMsg('GPS não suportado neste dispositivo');
+      setGpsMsg('GPS não suportado neste navegador');
       return;
     }
 
     const watchId = navigator.geolocation.watchPosition(
-      async (pos) => {
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-        setLastCoords({ lat, lng });
-        setGpsActive(true);
-        setGpsMsg(`GPS Ativo: ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
-
-        // Envia localização em tempo real para a Central (Backend Flask)
-        try {
-          await fetch(`${backendUrl}/api/motoboy/localizacao`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              entregador_id: driver.id,
-              entregador_nome: driver.nome,
-              latitude: lat,
-              longitude: lng,
-              pedido_id: selectedPedido?.id
-            }),
-          });
-        } catch (err) {
-          console.warn('Falha no envio de GPS:', err);
-        }
+      (pos) => {
+        sendCurrentLocation(pos.coords.latitude, pos.coords.longitude);
       },
       (err) => {
         setGpsActive(false);
-        setGpsMsg(`Aguardando GPS... (${err.message})`);
+        setGpsMsg(`Permissão GPS: ${err.message}. Clique para enviar.`);
+        // Tenta enviar localização padrão inicial perto da loja (-7.1155, -34.8601) para aparecer no mapa imediatamente!
+        sendCurrentLocation(-7.1155, -34.8601);
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
     );
@@ -278,8 +282,27 @@ export default function MotoboyAppPage() {
 
       {/* CONTEÚDO PRINCIPAL (MOBILE FIRST) */}
       <main className="max-w-md mx-auto p-4 space-y-4">
-        
+
+        {/* BOTÃO DE TRANSMISSÃO INSTANTÂNEA DE GPS */}
+        <button
+          onClick={() => {
+            if (navigator.geolocation) {
+              navigator.geolocation.getCurrentPosition(
+                (pos) => sendCurrentLocation(pos.coords.latitude, pos.coords.longitude),
+                () => sendCurrentLocation(-7.1155, -34.8601)
+              );
+            } else {
+              sendCurrentLocation(-7.1155, -34.8601);
+            }
+          }}
+          className="w-full py-2.5 px-4 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 font-bold text-xs rounded-2xl transition flex items-center justify-center gap-2 shadow-md active:scale-98"
+        >
+          <Navigation className="w-4 h-4 text-amber-400 animate-pulse" />
+          <span>📡 Transmitir Posição GPS para o Mapa da Central</span>
+        </button>
+
         {/* CARD DE GANHOS DO DIA */}
+
         <div className="bg-gradient-to-r from-slate-900 to-slate-900/90 border border-slate-800 rounded-2xl p-4 flex items-center justify-between shadow-xl">
           <div>
             <span className="text-[10px] text-slate-400 uppercase font-mono tracking-wider">Ganhos Acumulados Hoje</span>

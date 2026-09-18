@@ -8,10 +8,14 @@ export interface DriverData {
   nome: string;
   telefone: string;
   placa_veiculo?: string;
-  status: 'disponivel' | 'em_rota' | 'pausa';
+  status: 'disponivel' | 'em_rota' | 'pausa' | string;
   total_entregas?: number;
   frete_acumulado?: number;
+  latitude?: number;
+  longitude?: number;
+  last_seen?: string;
 }
+
 
 interface CadastroMotoboyModalProps {
   isOpen: boolean;
