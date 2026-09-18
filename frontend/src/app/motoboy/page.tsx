@@ -217,6 +217,24 @@ export default function MotoboyAppPage() {
     }
   };
 
+  const handleLogout = async () => {
+    if (driver) {
+      try {
+        await fetch(`${backendUrl}/api/motoboy/status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            entregador_id: driver.id,
+            status: 'offline'
+          })
+        });
+      } catch {}
+    }
+    localStorage.removeItem('motoboy_session');
+    setDriver(null);
+    setIsOnline(false);
+  };
+
   // Se não houver driver selecionado
   if (!driver) {
     return (
@@ -233,6 +251,7 @@ export default function MotoboyAppPage() {
             onClick={() => {
               const d = { id: 'd1', nome: 'ANDERSON (Moto 01)', telefone: '83999112233', placa_veiculo: 'MOP-1001' };
               setDriver(d);
+              setIsOnline(true);
               localStorage.setItem('motoboy_session', JSON.stringify(d));
             }}
             className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-sm shadow-md transition"
@@ -259,24 +278,35 @@ export default function MotoboyAppPage() {
                 {driver.nome}
               </h1>
               <div className="flex items-center gap-1.5 text-[11px] font-mono">
-                <span className={`w-2 h-2 rounded-full ${gpsActive ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'}`} />
-                <span className={gpsActive ? 'text-emerald-400 font-bold' : 'text-slate-400'}>{gpsMsg}</span>
+                <span className={`w-2 h-2 rounded-full ${gpsActive && isOnline ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'}`} />
+                <span className={gpsActive && isOnline ? 'text-emerald-400 font-bold' : 'text-slate-400'}>{isOnline ? gpsMsg : 'Status: Offline'}</span>
               </div>
             </div>
           </div>
 
-          {/* BOTÃO TOGGLE ONLINE/PAUSA */}
-          <button
-            onClick={toggleOnline}
-            className={`px-3.5 py-1.5 rounded-xl font-black text-xs transition-all flex items-center gap-1.5 shadow-md ${
-              isOnline
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-500/30'
-                : 'bg-red-500/20 text-red-300 border border-red-500/40 hover:bg-red-500/30'
-            }`}
-          >
-            {isOnline ? <Wifi className="w-3.5 h-3.5 text-emerald-400" /> : <WifiOff className="w-3.5 h-3.5 text-red-400" />}
-            <span>{isOnline ? 'ONLINE' : 'PAUSA'}</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {/* BOTÃO TOGGLE ONLINE/PAUSA */}
+            <button
+              onClick={toggleOnline}
+              className={`px-3 py-1.5 rounded-xl font-black text-xs transition-all flex items-center gap-1.5 shadow-md ${
+                isOnline
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-500/30'
+                  : 'bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30'
+              }`}
+            >
+              {isOnline ? <Wifi className="w-3.5 h-3.5 text-emerald-400" /> : <WifiOff className="w-3.5 h-3.5 text-amber-400" />}
+              <span>{isOnline ? 'ONLINE' : 'PAUSA'}</span>
+            </button>
+
+            {/* BOTÃO LOGOUT / SAIR */}
+            <button
+              onClick={handleLogout}
+              title="Sair do App"
+              className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-red-400 transition"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </header>
 

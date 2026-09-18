@@ -249,16 +249,22 @@ def atualizar_status_pedido(id_pedido):
 
     if supabase:
         try:
-            res = supabase.table("pedidos").update({"status": novo_status}).eq("id", id_pedido).execute()
-            return jsonify(res.data), 200
+            update_payload = {"status": novo_status}
+            if novo_status == "finalizado":
+                update_payload["motoboy_latitude"] = None
+                update_payload["motoboy_longitude"] = None
+            res = supabase.table("pedidos").update(update_payload).eq("id", id_pedido).execute()
         except Exception as e:
-            return jsonify({"error": str(e)}), 500
+            print(f"[AVISO Supabase] {e}")
+
+    conn = get_db_connection()
+    if novo_status == "finalizado":
+        conn.execute("UPDATE pedidos SET status = ?, motoboy_latitude = NULL, motoboy_longitude = NULL WHERE id = ? OR id_externo = ?", (novo_status, id_pedido, id_pedido))
     else:
-        conn = get_db_connection()
-        conn.execute("UPDATE pedidos SET status = ? WHERE id = ?", (novo_status, id_pedido))
-        conn.commit()
-        conn.close()
-        return jsonify({"status": "success", "id": id_pedido, "novo_status": novo_status}), 200
+        conn.execute("UPDATE pedidos SET status = ? WHERE id = ? OR id_externo = ?", (novo_status, id_pedido, id_pedido))
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "success", "id": id_pedido, "novo_status": novo_status}), 200
 
 
 @app.route("/api/webhook/web", methods=["POST"])
@@ -543,7 +549,7 @@ def despachar_pedido(id_pedido):
 
 @app.route("/api/motoboy/status", methods=["POST"])
 def atualizar_status_motoboy():
-    """Atualiza o status do motoboy (disponivel, em_rota, pausa) no banco."""
+    """Atualiza o status do motoboy (disponivel, em_rota, pausa, offline) no banco."""
     data = request.get_json() or {}
     entregador_id = data.get("entregador_id")
     novo_status = data.get("status")
@@ -552,7 +558,10 @@ def atualizar_status_motoboy():
         return jsonify({"error": "entregador_id e status são obrigatórios"}), 400
 
     conn = get_db_connection()
-    conn.execute("UPDATE entregadores SET status = ? WHERE id = ? OR nome LIKE ?", (novo_status, entregador_id, f"%{entregador_id}%"))
+    if novo_status in ('pausa', 'offline'):
+        conn.execute("UPDATE entregadores SET status = ?, latitude = NULL, longitude = NULL WHERE id = ? OR nome LIKE ?", (novo_status, entregador_id, f"%{entregador_id}%"))
+    else:
+        conn.execute("UPDATE entregadores SET status = ? WHERE id = ? OR nome LIKE ?", (novo_status, entregador_id, f"%{entregador_id}%"))
     conn.commit()
     conn.close()
 
@@ -560,7 +569,6 @@ def atualizar_status_motoboy():
 
 
 @app.route("/api/motoboy/localizacao", methods=["POST"])
-
 def atualizar_localizacao_motoboy():
     """
     Recebe a localização GPS do celular do motoboy em tempo real.
@@ -584,7 +592,7 @@ def atualizar_localizacao_motoboy():
     if search_key:
         conn.execute("""
             UPDATE entregadores 
-            SET latitude = ?, longitude = ?, last_seen = ?, status = CASE WHEN status = 'pausa' THEN 'pausa' ELSE 'disponivel' END
+            SET latitude = ?, longitude = ?, last_seen = ?, status = CASE WHEN status = 'pausa' OR status = 'offline' THEN status ELSE 'disponivel' END
             WHERE id = ? OR nome LIKE ?
         """, (lat, lng, now_str, search_key, f"%{search_key}%"))
 
@@ -594,7 +602,6 @@ def atualizar_localizacao_motoboy():
         rows = conn.execute("SELECT * FROM pedidos WHERE (entregador_id = ? OR entregador_nome LIKE ?) AND status = 'em_rota'", (search_key, f"%{search_key}%")).fetchall()
     else:
         rows = conn.execute("SELECT * FROM pedidos WHERE status = 'em_rota'").fetchall()
-
 
     alertas_disparados = []
 
@@ -653,10 +660,10 @@ def atualizar_localizacao_motoboy():
 def confirmar_pin_entrega(id_pedido):
     """
     Valida o código PIN de 4 dígitos digitado pelo motoboy.
-    Se correto, marca a entrega como finalizada e computa o frete do entregador.
+    Se correto, marca a entrega como finalizada, limpa coordenadas do motoboy no pedido e computa o frete.
     """
     data = request.get_json() or {}
-    pin_digitado = str(data.get("codigo_pin", "")).strip()
+    pin_digitado = str(data.get("codigo_pin", "") or data.get("pin", "")).strip()
 
     if not pin_digitado:
         return jsonify({"error": "Código PIN é obrigatório"}), 400
@@ -675,8 +682,8 @@ def confirmar_pin_entrega(id_pedido):
         conn.close()
         return jsonify({"error": f"Código PIN incorreto ({pin_digitado}). Solicite ao cliente os 4 dígitos informados."}), 400
 
-    # Atualiza status no banco local
-    conn.execute("UPDATE pedidos SET status = 'despachado' WHERE id = ? OR id_externo = ?", (id_pedido, id_pedido))
+    # Atualiza status para finalizado e limpa coordenadas de rota
+    conn.execute("UPDATE pedidos SET status = 'finalizado', motoboy_latitude = NULL, motoboy_longitude = NULL WHERE id = ? OR id_externo = ?", (id_pedido, id_pedido))
 
     # Credita entrega e frete ao entregador
     entregador_id = pedido.get("entregador_id")
@@ -693,7 +700,11 @@ def confirmar_pin_entrega(id_pedido):
 
     if supabase:
         try:
-            supabase.table("pedidos").update({"status": "despachado"}).eq("id", id_pedido).execute()
+            supabase.table("pedidos").update({
+                "status": "finalizado",
+                "motoboy_latitude": None,
+                "motoboy_longitude": None
+            }).eq("id", id_pedido).execute()
         except Exception as e:
             print(f"[AVISO] Falha ao sincronizar PIN no Supabase: {e}")
 

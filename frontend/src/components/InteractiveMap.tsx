@@ -411,42 +411,9 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
       `);
     layerGroup.addLayer(storeMarker);
 
-    // 3. Marcador do Entregador (ANDERSON em Tambaú conforme print 1)
-    const activeMotoboyOrder = pedidos.find((p) => p.motoboy_latitude && p.motoboy_longitude);
-    const courierLat = activeMotoboyOrder?.motoboy_latitude || -7.1132;
-    const courierLng = activeMotoboyOrder?.motoboy_longitude || -34.8305;
-
-    const courierIcon = L.divIcon({
-      className: 'custom-courier-marker',
-      html: `
-        <div class="flex flex-col items-center select-none cursor-pointer">
-          <div class="px-2.5 py-0.5 rounded bg-amber-400 text-slate-950 text-[11px] font-black tracking-wider uppercase shadow-xl border border-slate-900/40 whitespace-nowrap mb-0.5">
-            ANDERSON
-          </div>
-          <div class="relative flex items-center justify-center">
-            <div class="w-8 h-8 rounded-full bg-amber-400 text-slate-950 flex items-center justify-center border-2 border-white shadow-2xl">
-              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
-              </svg>
-            </div>
-            <div class="absolute -right-2 -bottom-1 bg-white text-slate-900 px-1 py-0.5 rounded-full border border-amber-500 shadow text-[9px] font-bold leading-none">
-              🏍️
-            </div>
-          </div>
-          <div class="w-0 h-0 border-l-[4px] border-r-[4px] border-t-[5px] border-l-transparent border-r-transparent border-t-amber-400 mt-0.5"></div>
-        </div>
-      `,
-      iconSize: [100, 55],
-      iconAnchor: [50, 52],
-    });
-
-    const courierMarker = L.marker([courierLat, courierLng], { icon: courierIcon })
-      .bindPopup(`<strong style="color: #0f172a;">Entregador: ANDERSON (Em Rota)</strong>`);
-    layerGroup.addLayer(courierMarker);
-
-    // 4. Marcadores de Pedidos (0121, 0123, 0122)
+    // 3. Marcadores de Pedidos (Exclui concluídos/finalizados na visão 'todos')
     const filteredPedidos = pedidos.filter((p) => {
-      if (selectedStatusFilter === 'todos') return true;
+      if (selectedStatusFilter === 'todos') return p.status !== 'finalizado';
       return p.status === selectedStatusFilter;
     });
 
@@ -661,17 +628,17 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
       }
     }
 
-    // 7. Renderização dos Motoboys com GPS Ao Vivo Transmitido via Celular PWA
+    // 7. Renderização dos Motoboys com GPS Ao Vivo Transmitido via Celular PWA (Somente se ONLINE)
     if (drivers && drivers.length > 0) {
       drivers.forEach((d) => {
-        if (d.latitude && d.longitude) {
-          const isOnline = d.status !== 'offline' && d.status !== 'pausa';
+        const isOnline = d.status !== 'offline' && d.status !== 'pausa';
+        if (isOnline && d.latitude && d.longitude) {
           const driverIcon = L.divIcon({
             className: 'custom-driver-marker',
             html: `
-              <div class="flex flex-col items-center">
+              <div class="flex flex-col items-center select-none cursor-pointer">
                 <div class="px-2.5 py-0.5 rounded-full bg-slate-900/95 text-amber-300 font-black text-[10px] border border-amber-500/50 shadow-2xl whitespace-nowrap mb-1">
-                  🛵 ${d.nome.split(' ')[0]} ${isOnline ? '🟢' : '🔴'}
+                  🛵 ${d.nome.split(' ')[0]} 🟢
                 </div>
                 <div class="w-10 h-10 rounded-full bg-amber-500 text-slate-950 font-black flex items-center justify-center border-2 border-white shadow-2xl animate-bounce">
                   <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
@@ -684,7 +651,8 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             iconAnchor: [30, 55],
           });
 
-          const driverMarker = L.marker([d.latitude, d.longitude], { icon: driverIcon });
+          const driverMarker = L.marker([d.latitude, d.longitude], { icon: driverIcon })
+            .bindPopup(`<strong style="color: #0f172a;">Entregador: ${d.nome} (${d.status})</strong>`);
           layerGroup.addLayer(driverMarker);
         }
       });
