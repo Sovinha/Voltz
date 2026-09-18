@@ -528,7 +528,26 @@ def despachar_pedido(id_pedido):
     }), 200
 
 
+@app.route("/api/motoboy/status", methods=["POST"])
+def atualizar_status_motoboy():
+    """Atualiza o status do motoboy (disponivel, em_rota, pausa) no banco."""
+    data = request.get_json() or {}
+    entregador_id = data.get("entregador_id")
+    novo_status = data.get("status")
+
+    if not entregador_id or not novo_status:
+        return jsonify({"error": "entregador_id e status são obrigatórios"}), 400
+
+    conn = get_db_connection()
+    conn.execute("UPDATE entregadores SET status = ? WHERE id = ? OR nome LIKE ?", (novo_status, entregador_id, f"%{entregador_id}%"))
+    conn.commit()
+    conn.close()
+
+    return jsonify({"status": "success", "message": f"Status atualizado para {novo_status}"}), 200
+
+
 @app.route("/api/motoboy/localizacao", methods=["POST"])
+
 def atualizar_localizacao_motoboy():
     """
     Recebe a localização GPS do celular do motoboy em tempo real.
