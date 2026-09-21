@@ -81,11 +81,7 @@ export const MapTab: React.FC = () => {
   const [maxDeliveriesPerRun, setMaxDeliveriesPerRun] = useState<number>(4);
 
   // Lista de Entregadores Cadastrados
-  const [drivers, setDrivers] = useState<DriverData[]>([
-    { id: '1', nome: 'ANDERSON', telefone: '83999887766', placa_veiculo: 'MOP-1020', status: 'disponivel', total_entregas: 12, frete_acumulado: 84.0 },
-    { id: '2', nome: 'ROBERTO', telefone: '83988776655', placa_veiculo: 'MOP-3040', status: 'disponivel', total_entregas: 8, frete_acumulado: 56.0 },
-    { id: '3', nome: 'CARLOS', telefone: '83977665544', placa_veiculo: 'MOP-5060', status: 'pausa', total_entregas: 5, frete_acumulado: 35.0 },
-  ]);
+  const [drivers, setDrivers] = useState<DriverData[]>([]);
 
   // Visibilidade de Rotas Sob Demanda
   const [showSingleRoute, setShowSingleRoute] = useState(false);

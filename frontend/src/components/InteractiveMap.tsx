@@ -703,15 +703,23 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
 
     // 7. Renderização dos Motoboys com GPS Ao Vivo Transmitido via Celular PWA (Somente se ONLINE)
     if (drivers && drivers.length > 0) {
+      const driverPoints: L.LatLngExpression[] = [];
+
       drivers.forEach((d) => {
         const isOnline = d.status !== 'offline' && d.status !== 'pausa';
-        if (isOnline && d.latitude && d.longitude) {
+        const lat = Number(d.latitude);
+        const lng = Number(d.longitude);
+
+        if (isOnline && !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) {
+          driverPoints.push([lat, lng]);
+
           const driverIcon = L.divIcon({
             className: 'custom-driver-marker',
             html: `
               <div class="flex flex-col items-center select-none cursor-pointer">
-                <div class="px-2.5 py-0.5 rounded-full bg-slate-900/95 text-amber-300 font-black text-[10px] border border-amber-500/50 shadow-2xl whitespace-nowrap mb-1">
-                  🛵 ${d.nome.split(' ')[0]} 🟢
+                <div class="px-2.5 py-0.5 rounded-full bg-slate-900/95 text-amber-300 font-black text-[10px] border border-amber-500/50 shadow-2xl whitespace-nowrap mb-1 flex items-center gap-1">
+                  <span>🛵 ${d.nome.split(' ')[0]}</span>
+                  <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
                 </div>
                 <div class="w-10 h-10 rounded-full bg-amber-500 text-slate-950 font-black flex items-center justify-center border-2 border-white shadow-2xl animate-bounce">
                   <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
@@ -724,11 +732,28 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             iconAnchor: [30, 55],
           });
 
-          const driverMarker = L.marker([d.latitude, d.longitude], { icon: driverIcon })
-            .bindPopup(`<strong style="color: #0f172a;">Entregador: ${d.nome} (${d.status})</strong>`);
+          const driverMarker = L.marker([lat, lng], { icon: driverIcon, zIndexOffset: 1000 })
+            .bindPopup(`
+              <div style="font-family: sans-serif; padding: 4px;">
+                <strong style="color: #0f172a; font-size: 13px;">🛵 ${d.nome}</strong><br/>
+                <span style="font-size: 11px; color: #16a34a; font-weight: bold;">Status: ${d.status.toUpperCase()}</span><br/>
+                <span style="font-size: 10px; color: #64748b;">GPS: ${lat.toFixed(4)}, ${lng.toFixed(4)}</span>
+              </div>
+            `);
           layerGroup.addLayer(driverMarker);
         }
       });
+
+      // Auto-fit bounds para incluir loja e motoboys ativos no mapa se houver pontos de motoboy
+      if (driverPoints.length > 0 && mapRef.current) {
+        try {
+          const allBounds = L.latLngBounds([
+            [loja.latitude, loja.longitude],
+            ...driverPoints
+          ]);
+          mapRef.current.fitBounds(allBounds, { padding: [50, 50], maxZoom: 15 });
+        } catch {}
+      }
     }
 
     // 8. Animação de Deslocamento de Rota Ativa
