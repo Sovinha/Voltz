@@ -113,5 +113,41 @@ class TestPlaywrightScraper(unittest.TestCase):
             browser.close()
 
 
+    def test_osrm_status(self):
+        """Testa o endpoint de status do OSRM."""
+        response = self.app.get('/api/osrm/status')
+        self.assertIn(response.status_code, [200, 502])
+        data = json.loads(response.data)
+        self.assertIn('status', data)
+        self.assertIn('osrm_base_url', data)
+
+    def test_osrm_route_validation(self):
+        """Testa validação de parâmetro waypoints no OSRM /api/route."""
+        response = self.app.get('/api/route')
+        self.assertEqual(response.status_code, 400)
+        data = json.loads(response.data)
+        self.assertIn('error', data)
+
+    def test_osrm_route_success(self):
+        """Testa consulta de rota válida via OSRM proxy."""
+        waypoints = "-34.8601,-7.1155;-34.8520,-7.1210"
+        response = self.app.get(f'/api/route?waypoints={waypoints}')
+        self.assertIn(response.status_code, [200, 502])
+        if response.status_code == 200:
+            data = json.loads(response.data)
+            self.assertEqual(data.get('code'), 'Ok')
+            self.assertTrue(len(data.get('routes', [])) > 0)
+
+    def test_osrm_trip_success(self):
+        """Testa otimização de rota em lote (TSP) via OSRM proxy."""
+        waypoints = "-34.8601,-7.1155;-34.8520,-7.1210;-34.8450,-7.1180"
+        response = self.app.get(f'/api/trip?waypoints={waypoints}&source=first')
+        self.assertIn(response.status_code, [200, 502])
+        if response.status_code == 200:
+            data = json.loads(response.data)
+            self.assertIn(data.get('code'), ['Ok', 'Ok!'])
+
+
 if __name__ == '__main__':
     unittest.main()
+

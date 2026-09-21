@@ -6,6 +6,17 @@ import 'leaflet/dist/leaflet.css';
 import { Pedido, OrdemStatus } from '@/lib/supabase';
 import { checkIsPeakHour } from '@/lib/DispatchEngine';
 import { DriverData } from './CadastroMotoboyModal';
+import { Navigation, Bike, Car, Footprints, ListOrdered, ChevronDown, ChevronUp, Zap, Sparkles, CheckCircle2, ShieldCheck } from 'lucide-react';
+
+export interface OsrmStep {
+  name: string;
+  distance: number;
+  duration: number;
+  maneuver: {
+    type: string;
+    modifier?: string;
+  };
+}
 
 export interface LojaConfig {
   nome: string;
@@ -83,6 +94,32 @@ const generateGridStreetPath = (points: [number, number][]): [number, number][] 
   return result;
 };
 
+// Helper de formatação e tradução das instruções curva-a-curva (Turn-by-Turn Steps)
+const formatOsrmStep = (step: OsrmStep): string => {
+  const street = step.name ? `em ${step.name}` : '';
+  const dist = step.distance >= 1000
+    ? `${(step.distance / 1000).toFixed(1)} km`
+    : `${Math.round(step.distance)} m`;
+
+  const type = step.maneuver?.type;
+  const mod = step.maneuver?.modifier;
+
+  if (type === 'depart') return `Inicie o trajeto ${street} por ${dist}`;
+  if (type === 'arrive') return `Chegou ao ponto de entrega`;
+  if (type === 'turn') {
+    if (mod === 'right' || mod === 'sharp right') return `Vire à direita ${street} (${dist})`;
+    if (mod === 'left' || mod === 'sharp left') return `Vire à esquerda ${street} (${dist})`;
+    if (mod === 'slight right') return `Mantenha-se à direita ${street} (${dist})`;
+    if (mod === 'slight left') return `Mantenha-se à esquerda ${street} (${dist})`;
+    return `Vire ${street} (${dist})`;
+  }
+  if (type === 'roundabout' || type === 'rotary') return `Na rotatória, pegue a saída ${street} (${dist})`;
+  if (type === 'new name' || type === 'continue') return `Continue ${street} por ${dist}`;
+  if (type === 'fork') return `Mantenha-se ${mod === 'right' ? 'à direita' : 'à esquerda'} na bifurcação (${dist})`;
+
+  return `Siga ${street} por ${dist}`;
+};
+
 export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   loja,
   pedidos,
@@ -115,6 +152,12 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   // Trajeto em ruas reais via OSRM API para Lote Multi-Pedido
   const [batchOsrmPoints, setBatchOsrmPoints] = useState<[number, number][]>([]);
 
+  // OSRM v5 Features
+  const [osrmProfile, setOsrmProfile] = useState<'driving' | 'bike' | 'foot'>('driving');
+  const [osrmSteps, setOsrmSteps] = useState<OsrmStep[]>([]);
+  const [showStepsDrawer, setShowStepsDrawer] = useState<boolean>(false);
+  const [osrmServerUsed, setOsrmServerUsed] = useState<string>('OSRM Server');
+
   const [showEtaBadge, setShowEtaBadge] = useState<boolean>(false);
   const [currentBikeCoords, setCurrentBikeCoords] = useState<{ lat: number; lng: number } | null>(null);
 
@@ -125,7 +168,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     }
   }, [showEtaBadgeExternal]);
 
-  // 1. Busca de rota em RUAS REAIS (OSRM) para Pedido Único
+  // 1. Busca de rota em RUAS REAIS (OSRM /route/v1/) para Pedido Único
   useEffect(() => {
     if (!selectedPedido) return;
 
@@ -141,9 +184,9 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
       const waypoints = `${originLng},${originLat};${targetLng},${targetLat}`;
       const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
       const urls = [
-        `${backendUrl}/api/route?waypoints=${waypoints}`,
-        `https://router.project-osrm.org/route/v1/driving/${waypoints}?overview=full&geometries=geojson`,
-        `https://routing.openstreetmap.de/routed-car/route/v1/driving/${waypoints}?overview=full&geometries=geojson`,
+        `${backendUrl}/api/route?waypoints=${waypoints}&profile=${osrmProfile}&steps=true`,
+        `https://router.project-osrm.org/route/v1/driving/${waypoints}?overview=full&geometries=geojson&steps=true`,
+        `https://routing.openstreetmap.de/routed-car/route/v1/driving/${waypoints}?overview=full&geometries=geojson&steps=true`,
       ];
 
       for (const url of urls) {
@@ -162,6 +205,33 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
 
               setSingleOsrmPoints(coords);
               setOsrmEtaInfo({ min, km });
+
+              // Extrai instrucoes curva-a-curva (steps) do OSRM
+              if (route.legs && route.legs.length > 0) {
+                const legSteps: OsrmStep[] = [];
+                route.legs.forEach((leg: any) => {
+                  if (leg.steps) {
+                    leg.steps.forEach((s: any) => {
+                      if (s.maneuver && s.maneuver.type !== 'depart' && s.maneuver.type !== 'arrive') {
+                        legSteps.push({
+                          name: s.name || '',
+                          distance: s.distance || 0,
+                          duration: s.duration || 0,
+                          maneuver: s.maneuver
+                        });
+                      }
+                    });
+                  }
+                });
+                setOsrmSteps(legSteps);
+              }
+
+              if (data._meta?.server_used) {
+                setOsrmServerUsed(data._meta.server_used);
+              } else if (url.includes('project-osrm.org')) {
+                setOsrmServerUsed('Project-OSRM v5 (Demo)');
+              }
+
               return;
             }
           }
@@ -176,12 +246,13 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
       const gridCoords = generateGridStreetPath([[originLat, originLng], [targetLat, targetLng]]);
       setSingleOsrmPoints(gridCoords);
       setOsrmEtaInfo({ min: Math.round(baseMin * peakInfo.factor), km: parseFloat(directKm.toFixed(1)) });
+      setOsrmSteps([]);
     };
 
     fetchSingleRoute();
-  }, [selectedPedido, selectedStatusFilter, loja]);
+  }, [selectedPedido, selectedStatusFilter, loja, osrmProfile]);
 
-  // 2. Busca de rota em RUAS REAIS (OSRM Multi-Stop) para Lote Multi-Pedido (com Retorno à Loja)
+  // 2. Busca de rota em RUAS REAIS com OSRM Trip API (TSP Solver Multi-Stop) para Lote Multi-Pedido
   useEffect(() => {
     if (batchPedidos.length === 0) {
       setBatchOsrmPoints([]);
@@ -211,9 +282,10 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
 
       const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
       const urls = [
-        `${backendUrl}/api/route?waypoints=${waypoints}`,
+        `${backendUrl}/api/trip?waypoints=${waypoints}&source=first&roundtrip=${includeReturnLeg ? 'true' : 'false'}&profile=${osrmProfile}`,
+        `${backendUrl}/api/route?waypoints=${waypoints}&profile=${osrmProfile}`,
+        `https://router.project-osrm.org/trip/v1/driving/${waypoints}?overview=full&geometries=geojson&steps=true`,
         `https://router.project-osrm.org/route/v1/driving/${waypoints}?overview=full&geometries=geojson`,
-        `https://routing.openstreetmap.de/routed-car/route/v1/driving/${waypoints}?overview=full&geometries=geojson`,
       ];
 
       for (const url of urls) {
@@ -221,13 +293,13 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           const res = await fetch(url);
           if (res.ok) {
             const data = await res.json();
-            if (data.routes && data.routes.length > 0) {
-              const route = data.routes[0];
-              const coords: [number, number][] = route.geometry.coordinates.map(
+            const activeResult = (data.trips && data.trips[0]) || (data.routes && data.routes[0]);
+            if (activeResult) {
+              const coords: [number, number][] = activeResult.geometry.coordinates.map(
                 (c: [number, number]) => [c[1], c[0]] as [number, number]
               );
-              const totalKm = parseFloat((route.distance / 1000).toFixed(1));
-              const baseMin = Math.round(route.duration / 60) || 1;
+              const totalKm = parseFloat((activeResult.distance / 1000).toFixed(1));
+              const baseMin = Math.round(activeResult.duration / 60) || 1;
               const totalMin = Math.round(baseMin * peakInfo.factor);
 
               const returnRatio = includeReturnLeg ? 0.3 : 0;
@@ -272,7 +344,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     };
 
     fetchBatchRoute();
-  }, [batchPedidos, loja, includeReturnLeg]);
+  }, [batchPedidos, loja, includeReturnLeg, osrmProfile]);
 
   // 3. Animação de Deslocamento do Motoboy Percorrendo as Ruas Reais
   useEffect(() => {
@@ -682,26 +754,116 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
 
   return (
     <div className="relative w-full h-[calc(100vh-140px)] min-h-[600px] rounded-2xl overflow-hidden border border-slate-800 shadow-2xl z-0">
-      {/* Seletor de Modelo de Mapa (100% Grátis) */}
-      <div className="absolute top-3 left-64 z-[500] flex items-center gap-1 bg-slate-900/95 backdrop-blur-md p-1.5 rounded-xl border border-slate-700/60 shadow-2xl">
+      {/* Barra de Ferramentas OSRM & Seletor de Modelo de Mapa */}
+      <div className="absolute top-3 left-4 right-4 z-[500] flex flex-wrap items-center justify-between gap-2 pointer-events-none">
+        
+        {/* Esquerda: Seletor Estilo do Mapa */}
+        <div className="flex items-center gap-1 bg-slate-900/95 backdrop-blur-md p-1.5 rounded-xl border border-slate-700/60 shadow-2xl pointer-events-auto">
+          {(Object.keys(MAP_STYLES) as Array<keyof typeof MAP_STYLES>).map((styleKey) => (
+            <button
+              key={styleKey}
+              onClick={() => setMapStyle(styleKey)}
+              className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all ${
+                mapStyle === styleKey
+                  ? 'bg-amber-500 text-slate-950 shadow-md scale-105'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              {MAP_STYLES[styleKey].name}
+            </button>
+          ))}
+        </div>
 
-        {(Object.keys(MAP_STYLES) as Array<keyof typeof MAP_STYLES>).map((styleKey) => (
-          <button
-            key={styleKey}
-            onClick={() => setMapStyle(styleKey)}
-            className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all ${
-              mapStyle === styleKey
-                ? 'bg-amber-500 text-slate-950 shadow-md scale-105'
-                : 'text-slate-300 hover:text-white hover:bg-slate-800'
-            }`}
-          >
-            {MAP_STYLES[styleKey].name}
-          </button>
-        ))}
+        {/* Direita: Controles OSRM v5 (Perfis & Navegação Passo a Passo) */}
+        <div className="flex items-center gap-2 pointer-events-auto">
+          {/* Seletor de Perfil OSRM */}
+          <div className="flex items-center gap-1 bg-slate-900/95 backdrop-blur-md p-1.5 rounded-xl border border-slate-700/60 shadow-2xl">
+            <button
+              onClick={() => setOsrmProfile('driving')}
+              title="Perfil Veículo / Moto"
+              className={`p-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
+                osrmProfile === 'driving'
+                  ? 'bg-emerald-500 text-slate-950 shadow-md scale-105'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <Car className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Moto/Carro</span>
+            </button>
+            <button
+              onClick={() => setOsrmProfile('bike')}
+              title="Perfil Bicicleta"
+              className={`p-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
+                osrmProfile === 'bike'
+                  ? 'bg-emerald-500 text-slate-950 shadow-md scale-105'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <Bike className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Bike</span>
+            </button>
+          </div>
+
+          {/* Botão de Instruções Curva-a-Curva (Steps) */}
+          {osrmSteps.length > 0 && (
+            <button
+              onClick={() => setShowStepsDrawer(!showStepsDrawer)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-xl border border-indigo-400/30 transition-all animate-pulse"
+            >
+              <Navigation className="w-3.5 h-3.5" />
+              <span>Passos ({osrmSteps.length})</span>
+              {showStepsDrawer ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </button>
+          )}
+
+          {/* Indicador de Servidor OSRM */}
+          <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900/90 border border-slate-800 text-[10px] font-mono text-emerald-400 shadow-xl">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+            <span>OSRM v5</span>
+          </div>
+        </div>
       </div>
+
+      {/* Card Flutuante de Instruções de Rota Curva-a-Curva (Turn-by-Turn Steps) */}
+      {showStepsDrawer && osrmSteps.length > 0 && (
+        <div className="absolute top-16 right-4 z-[600] w-80 max-h-[70vh] overflow-y-auto bg-slate-900/95 backdrop-blur-xl border border-slate-700/80 rounded-2xl p-4 shadow-2xl animate-in fade-in slide-in-from-top-4 duration-200">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-3">
+            <div className="flex items-center gap-2 text-amber-400 font-black text-xs uppercase tracking-wider">
+              <Navigation className="w-4 h-4 text-amber-400" />
+              <span>Navegação Curva-a-Curva OSRM</span>
+            </div>
+            <button
+              onClick={() => setShowStepsDrawer(false)}
+              className="text-slate-400 hover:text-white text-xs font-bold px-1.5 py-0.5 rounded-md hover:bg-slate-800"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="space-y-2.5">
+            {osrmSteps.map((step, idx) => {
+              const formattedText = formatOsrmStep(step);
+              return (
+                <div key={idx} className="flex items-start gap-2.5 p-2 rounded-xl bg-slate-950/60 border border-slate-800/80 text-xs text-slate-200 hover:border-slate-700 transition-colors">
+                  <div className="w-5 h-5 rounded-full bg-amber-500/10 text-amber-400 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5 border border-amber-500/20">
+                    {idx + 1}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold leading-tight text-slate-100">{formattedText}</p>
+                    <span className="text-[10px] text-slate-500 font-mono">
+                      {step.distance >= 1000 ? `${(step.distance / 1000).toFixed(1)} km` : `${Math.round(step.distance)} m`} • {Math.ceil(step.duration / 60)} min
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div ref={mapContainerRef} className="w-full h-full bg-slate-950" />
     </div>
   );
 };
+
 

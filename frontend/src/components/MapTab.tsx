@@ -198,7 +198,7 @@ export const MapTab: React.FC = () => {
     }
   }, [pedidos, selectedPedido]);
 
-  // Recálculo TSP Automático e Dinâmico do Lote
+  // Recálculo TSP Automático e Dinâmico do Lote via OSRM /api/trip (Ruas Reais)
   useEffect(() => {
     if (selectedBatchIds.length === 0) {
       setOrderedBatch([]);
@@ -208,34 +208,80 @@ export const MapTab: React.FC = () => {
     }
 
     const selectedOrders = pedidos.filter((p) => selectedBatchIds.includes(p.id));
-    let currentLat = loja.latitude;
-    let currentLng = loja.longitude;
+    if (selectedOrders.length === 0) return;
 
-    const unvisited = [...selectedOrders];
-    const ordered: Pedido[] = [];
+    const optimizeBatchWithOsrm = async () => {
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+      const waypointsArr = [
+        `${loja.longitude},${loja.latitude}`,
+        ...selectedOrders.map((p) => {
+          const lat = p.latitude || loja.latitude + 0.015;
+          const lng = p.longitude || loja.longitude + 0.015;
+          return `${lng},${lat}`;
+        })
+      ];
 
-    while (unvisited.length > 0) {
-      let closestIdx = 0;
-      let minDistance = Infinity;
+      try {
+        const res = await fetch(`${backendUrl}/api/trip?waypoints=${waypointsArr.join(';')}&source=first`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.waypoints && data.waypoints.length > 1) {
+            // Ordena os pedidos de acordo com o indice retornado pelo OSRM TSP
+            const sortedWaypoints = [...data.waypoints]
+              .filter((wp) => wp.waypoint_index > 0)
+              .sort((a, b) => a.trips_index - b.trips_index || a.waypoint_index - b.waypoint_index);
 
-      unvisited.forEach((p, idx) => {
-        const targetLat = p.latitude || loja.latitude + 0.01;
-        const targetLng = p.longitude || loja.longitude + 0.01;
-        const dist = calcDistanceKm(currentLat, currentLng, targetLat, targetLng);
-        if (dist < minDistance) {
-          minDistance = dist;
-          closestIdx = idx;
+            const osrmOrdered: Pedido[] = [];
+            sortedWaypoints.forEach((wp) => {
+              const orderIdx = wp.waypoint_index - 1;
+              if (selectedOrders[orderIdx]) {
+                osrmOrdered.push(selectedOrders[orderIdx]);
+              }
+            });
+
+            if (osrmOrdered.length === selectedOrders.length) {
+              setOrderedBatch(osrmOrdered);
+              setShowBatchRoute(true);
+              return;
+            }
+          }
         }
-      });
+      } catch (err) {
+        // Fallback em caso de erro de rede
+      }
 
-      const nextOrder = unvisited.splice(closestIdx, 1)[0];
-      ordered.push(nextOrder);
-      currentLat = nextOrder.latitude || loja.latitude + 0.01;
-      currentLng = nextOrder.longitude || loja.longitude + 0.01;
-    }
+      // Fallback: Algoritmo Nearest-Neighbor local
+      let currentLat = loja.latitude;
+      let currentLng = loja.longitude;
 
-    setOrderedBatch(ordered);
-    setShowBatchRoute(true);
+      const unvisited = [...selectedOrders];
+      const ordered: Pedido[] = [];
+
+      while (unvisited.length > 0) {
+        let closestIdx = 0;
+        let minDistance = Infinity;
+
+        unvisited.forEach((p, idx) => {
+          const targetLat = p.latitude || loja.latitude + 0.01;
+          const targetLng = p.longitude || loja.longitude + 0.01;
+          const dist = calcDistanceKm(currentLat, currentLng, targetLat, targetLng);
+          if (dist < minDistance) {
+            minDistance = dist;
+            closestIdx = idx;
+          }
+        });
+
+        const nextOrder = unvisited.splice(closestIdx, 1)[0];
+        ordered.push(nextOrder);
+        currentLat = nextOrder.latitude || loja.latitude + 0.01;
+        currentLng = nextOrder.longitude || loja.longitude + 0.01;
+      }
+
+      setOrderedBatch(ordered);
+      setShowBatchRoute(true);
+    };
+
+    optimizeBatchWithOsrm();
   }, [selectedBatchIds, pedidos, loja]);
 
   // Algoritmo Inteligente de Roteirização com DeepSeek AI

@@ -13,7 +13,7 @@ services:
       - FLASK_PORT=5000
       - FLASK_DEBUG=False
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-
+      - OSRM_BASE_URL=${OSRM_BASE_URL:-https://router.project-osrm.org}
 
     volumes:
       - backend_data:/app/database
@@ -31,7 +31,18 @@ services:
     depends_on:
       - backend
 
-
+  # Servidor OSRM Self-Hosted (Roteamento Offline de Alta Performance)
+  osrm:
+    image: osrm/osrm-backend:latest
+    container_name: voltz_osrm
+    restart: always
+    ports:
+      - "5001:5000"
+    command: osrm-routed --algorithm mld /data/nordeste-latest.osrm
+    volumes:
+      - ./osrm_data:/data
 
 volumes:
   backend_data:
+
+

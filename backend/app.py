@@ -143,34 +143,225 @@ def health_check():
     }), 200
 
 
+OSRM_BASE_URL = os.getenv("OSRM_BASE_URL", "https://router.project-osrm.org").rstrip("/")
+
+
+def _call_osrm_endpoint(endpoint_path, query_params=None):
+    """
+    Função auxiliar para realizar requisições resilientes aos servidores OSRM
+    com suporte a failover para servidores OSM alternativos e containers Docker.
+    """
+    import urllib.request
+    import urllib.parse
+    import time
+
+    params_str = f"?{urllib.parse.urlencode(query_params)}" if query_params else ""
+    
+    # Servidores OSRM primário (Self-Hosted Docker) e secundários de contingência
+    base_urls = [
+        OSRM_BASE_URL,
+        "http://osrm:5000",
+        "http://localhost:5001",
+        "https://router.project-osrm.org",
+        "https://routing.openstreetmap.de/routed-car"
+    ]
+    
+    # Remove duplicados preservando a ordem
+    unique_urls = []
+    for u in base_urls:
+        if u not in unique_urls:
+            unique_urls.append(u)
+
+    last_error = None
+    start_time = time.time()
+
+    for base in unique_urls:
+        target_url = f"{base}/{endpoint_path.lstrip('/')}{params_str}"
+        try:
+            req = urllib.request.Request(
+                target_url,
+                headers={"User-Agent": "VoltzLogistics/2.0 (Project-OSRM Client)"}
+            )
+            with urllib.request.urlopen(req, timeout=4) as response:
+                if response.status == 200:
+                    data = json.loads(response.read().decode("utf-8"))
+                    if data.get("code") in ("Ok", "Ok!"):
+                        data["_meta"] = {
+                            "server_used": base,
+                            "latency_ms": round((time.time() - start_time) * 1000, 1)
+                        }
+                        return data, 200
+        except Exception as e:
+            last_error = str(e)
+            # Log apenas erros relevantes se nao for tentativa de host local offline
+            if "localhost" not in base and "osrm:5000" not in base:
+                print(f"[AVISO OSRM] Falha na consulta em {target_url}: {e}")
+
+    return {"error": f"Falha nas APIs do OSRM. Ultimo erro: {last_error}"}, 502
+
+
+@app.route("/api/osrm/status", methods=["GET"])
+def get_osrm_status():
+    """
+    Verifica a saude, conectividade e latencia do servidor OSRM configurado.
+    """
+    test_waypoints = "-34.8601,-7.1155;-34.8520,-7.1210"
+    data, code = _call_osrm_endpoint(
+        f"route/v1/driving/{test_waypoints}",
+        {"overview": "false", "steps": "false"}
+    )
+
+    if code == 200:
+        return jsonify({
+            "status": "online",
+            "osrm_base_url": OSRM_BASE_URL,
+            "active_server": data.get("_meta", {}).get("server_used"),
+            "latency_ms": data.get("_meta", {}).get("latency_ms"),
+            "engine": "Project OSRM v5 API"
+        }), 200
+    else:
+        return jsonify({
+            "status": "degraded",
+            "osrm_base_url": OSRM_BASE_URL,
+            "error": data.get("error")
+        }), 502
+
+
 @app.route("/api/route", methods=["GET"])
 def get_osrm_route():
     """
-    Proxy de roteamento em ruas reais para evitar CORS, AdBlock e falhas de rede no frontend.
-    Query param: waypoints (ex: -34.8601,-7.1155;-34.8520,-7.1210)
+    Proxy de calculo de rotas em ruas reais via OSRM /route/v1/
+    Query params:
+      - waypoints: string "lng1,lat1;lng2,lat2;..." (obrigatorio)
+      - profile: "driving" (padrao), "bike", "foot"
+      - steps: "true" | "false"
+      - geometries: "geojson" | "polyline"
+      - overview: "full" | "simplified" | "false"
     """
     waypoints = request.args.get("waypoints")
     if not waypoints:
         return jsonify({"error": "Parametro waypoints e obrigatorio"}), 400
 
-    urls = [
-        f"https://router.project-osrm.org/route/v1/driving/{waypoints}?overview=full&geometries=geojson",
-        f"https://routing.openstreetmap.de/routed-car/route/v1/driving/{waypoints}?overview=full&geometries=geojson"
-    ]
+    profile = request.args.get("profile", "driving")
+    osrm_profile = "driving"
+    if profile in ("bike", "biking", "bicycle"):
+        osrm_profile = "driving"
+    elif profile in ("foot", "walking"):
+        osrm_profile = "driving"
 
-    import urllib.request
-    for url in urls:
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
-            with urllib.request.urlopen(req, timeout=5) as response:
-                if response.status == 200:
-                    data = json.loads(response.read().decode("utf-8"))
-                    if data.get("code") == "Ok" and data.get("routes"):
-                        return jsonify(data), 200
-        except Exception as e:
-            print(f"[AVISO] Falha ao buscar rota em {url}: {e}")
+    steps = request.args.get("steps", "true")
+    geometries = request.args.get("geometries", "geojson")
+    overview = request.args.get("overview", "full")
 
-    return jsonify({"error": "Nao foi possivel obter a rota das APIs de OSRM"}), 502
+    query_params = {
+        "overview": overview,
+        "geometries": geometries,
+        "steps": steps,
+        "annotations": "true"
+    }
+
+    endpoint = f"route/v1/{osrm_profile}/{waypoints}"
+    data, status_code = _call_osrm_endpoint(endpoint, query_params)
+    return jsonify(data), status_code
+
+
+@app.route("/api/trip", methods=["GET", "POST"])
+def get_osrm_trip():
+    """
+    Proxy de otimização de rotas multi-destino (TSP - Traveling Salesperson Problem) via OSRM /trip/v1/
+    Reordena automaticamente as paradas de entregas para menor distancia/tempo total.
+    """
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        waypoints = body.get("waypoints")
+        source = body.get("source", "first")
+        destination = body.get("destination", "any")
+        roundtrip = body.get("roundtrip", "true")
+        profile = body.get("profile", "driving")
+    else:
+        waypoints = request.args.get("waypoints")
+        source = request.args.get("source", "first")
+        destination = request.args.get("destination", "any")
+        roundtrip = request.args.get("roundtrip", "true")
+        profile = request.args.get("profile", "driving")
+
+    if not waypoints:
+        return jsonify({"error": "Parametro waypoints e obrigatorio"}), 400
+
+    query_params = {
+        "source": source,
+        "destination": destination,
+        "roundtrip": roundtrip,
+        "overview": "full",
+        "geometries": "geojson",
+        "steps": "true"
+    }
+
+    endpoint = f"trip/v1/{profile}/{waypoints}"
+    data, status_code = _call_osrm_endpoint(endpoint, query_params)
+    return jsonify(data), status_code
+
+
+@app.route("/api/table", methods=["GET", "POST"])
+def get_osrm_table():
+    """
+    Matriz de Distâncias e Durações entre múltiplos origens/destinos via OSRM /table/v1/
+    Util no despacho automatizado e alocação do entregador mais proximo.
+    """
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        waypoints = body.get("waypoints")
+        profile = body.get("profile", "driving")
+    else:
+        waypoints = request.args.get("waypoints")
+        profile = request.args.get("profile", "driving")
+
+    if not waypoints:
+        return jsonify({"error": "Parametro waypoints e obrigatorio"}), 400
+
+    query_params = {
+        "annotations": "duration,distance"
+    }
+
+    endpoint = f"table/v1/{profile}/{waypoints}"
+    data, status_code = _call_osrm_endpoint(endpoint, query_params)
+    return jsonify(data), status_code
+
+
+@app.route("/api/match", methods=["GET", "POST"])
+def get_osrm_match():
+    """
+    Ajuste de Rastro GPS (Map-Matching) via OSRM /match/v1/
+    Snapa coordenadas ruidosas de GPS de celulares diretamente nas pistas reais da rua.
+    Query/Body params:
+      - waypoints: string "lng1,lat1;lng2,lat2;..." (obrigatorio)
+      - timestamps: string "t1;t2;..." (opcional)
+      - profile: "driving" (padrao)
+    """
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        waypoints = body.get("waypoints")
+        timestamps = body.get("timestamps")
+        profile = body.get("profile", "driving")
+    else:
+        waypoints = request.args.get("waypoints")
+        timestamps = request.args.get("timestamps")
+        profile = request.args.get("profile", "driving")
+
+    if not waypoints:
+        return jsonify({"error": "Parametro waypoints e obrigatorio"}), 400
+
+    query_params = {
+        "overview": "full",
+        "geometries": "geojson",
+        "steps": "true"
+    }
+    if timestamps:
+        query_params["timestamps"] = timestamps
+
+    endpoint = f"match/v1/{profile}/{waypoints}"
+    data, status_code = _call_osrm_endpoint(endpoint, query_params)
+    return jsonify(data), status_code
 
 
 @app.route("/api/pedidos/reset", methods=["POST", "DELETE"])

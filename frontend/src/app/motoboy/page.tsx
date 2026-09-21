@@ -65,6 +65,11 @@ export default function MotoboyAppPage() {
   const [pinError, setPinError] = useState('');
   const [isSubmittingPin, setIsSubmittingPin] = useState(false);
 
+  // OSRM Turn-by-Turn Navigation State
+  const [osrmSteps, setOsrmSteps] = useState<any[]>([]);
+  const [osrmMetrics, setOsrmMetrics] = useState<{ min: number; km: number } | null>(null);
+  const [showNavigationDrawer, setShowNavigationDrawer] = useState(false);
+
   // RESOLUÇÃO DINÂMICA DA URL DO BACKEND (Garante funcionamento no Celular em VPS/IP Público)
   const getBackendUrl = () => {
     if (typeof window !== 'undefined') {
@@ -349,7 +354,7 @@ export default function MotoboyAppPage() {
     setIsOnline(nextState);
     if (driver) {
       try {
-        await fetch(`${backendUrl}/api/motoboy/status`, {
+        await fetch(`${getBackendUrl()}/api/motoboy/status`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -359,6 +364,76 @@ export default function MotoboyAppPage() {
         });
       } catch {}
     }
+  };
+
+  // Busca Rota OSRM para o Pedido Selecionado pelo Motoboy
+  useEffect(() => {
+    if (!selectedPedido) {
+      setOsrmSteps([]);
+      setOsrmMetrics(null);
+      return;
+    }
+
+    const originLat = lastCoords?.lat || -7.1155;
+    const originLng = lastCoords?.lng || -34.8601;
+    const targetLat = selectedPedido.latitude || -7.1005;
+    const targetLng = selectedPedido.longitude || -34.8450;
+
+    const fetchOsrmRoute = async () => {
+      try {
+        const waypoints = `${originLng},${originLat};${targetLng},${targetLat}`;
+        const url = `${getBackendUrl()}/api/route?waypoints=${waypoints}&steps=true`;
+        const res = await fetch(url);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.routes && data.routes.length > 0) {
+            const route = data.routes[0];
+            const km = parseFloat((route.distance / 1000).toFixed(1));
+            const min = Math.round(route.duration / 60) || 1;
+            setOsrmMetrics({ min, km });
+
+            if (route.legs && route.legs.length > 0) {
+              const steps: any[] = [];
+              route.legs.forEach((leg: any) => {
+                if (leg.steps) {
+                  leg.steps.forEach((s: any) => {
+                    if (s.maneuver && s.maneuver.type !== 'depart') {
+                      steps.push({
+                        name: s.name || '',
+                        distance: s.distance || 0,
+                        duration: s.duration || 0,
+                        maneuver: s.maneuver
+                      });
+                    }
+                  });
+                }
+              });
+              setOsrmSteps(steps);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Falha ao buscar navegação OSRM no PWA:', err);
+      }
+    };
+
+    fetchOsrmRoute();
+  }, [selectedPedido, lastCoords]);
+
+  const formatOsrmStepText = (step: any) => {
+    const street = step.name ? `em ${step.name}` : '';
+    const dist = step.distance >= 1000 ? `${(step.distance / 1000).toFixed(1)} km` : `${Math.round(step.distance)} m`;
+    const type = step.maneuver?.type;
+    const mod = step.maneuver?.modifier;
+
+    if (type === 'arrive') return `🏁 Chegou ao endereço do cliente!`;
+    if (type === 'turn') {
+      if (mod === 'right' || mod === 'sharp right') return `➡️ Vire à direita ${street} (${dist})`;
+      if (mod === 'left' || mod === 'sharp left') return `⬅️ Vire à esquerda ${street} (${dist})`;
+      return `↪️ Vire ${street} (${dist})`;
+    }
+    if (type === 'roundabout') return `🔄 Na rotatória, pegue a saída ${street} (${dist})`;
+    return `⬆️ Siga ${street} por ${dist}`;
   };
 
   // TELA DE LOGIN DO ENTREGADOR (Mobile First)
@@ -675,6 +750,52 @@ export default function MotoboyAppPage() {
                       </div>
                     )}
                   </div>
+
+                  {/* CARD DE NAVEGAÇÃO OSRM CURVA-A-CURVA */}
+                  {isEmRota && isSelected && (
+                    <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 space-y-2 animate-in fade-in">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 text-xs font-black text-amber-400">
+                          <Navigation className="w-3.5 h-3.5" />
+                          <span>Navegação OSRM em Tempo Real</span>
+                        </div>
+                        {osrmMetrics && (
+                          <div className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-md font-mono text-[11px] font-bold">
+                            {osrmMetrics.km} km • ~{osrmMetrics.min} min
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Primeira instrução de manobra */}
+                      {osrmSteps.length > 0 ? (
+                        <div className="p-2.5 bg-slate-900 border border-slate-800 rounded-lg text-xs font-semibold text-slate-100 flex items-center justify-between">
+                          <span>{formatOsrmStepText(osrmSteps[0])}</span>
+                          <button
+                            onClick={() => setShowNavigationDrawer(!showNavigationDrawer)}
+                            className="text-[10px] text-amber-400 hover:underline font-mono shrink-0 ml-2"
+                          >
+                            {showNavigationDrawer ? 'Ocultar Passos' : `Ver Passos (${osrmSteps.length})`}
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-slate-400 italic">Obtendo rota pelas ruas reais do OSRM...</div>
+                      )}
+
+                      {/* Lista expansível de manobras */}
+                      {showNavigationDrawer && osrmSteps.length > 0 && (
+                        <div className="space-y-1.5 pt-1 max-h-48 overflow-y-auto pr-1">
+                          {osrmSteps.map((s, idx) => (
+                            <div key={idx} className="p-2 bg-slate-900/90 rounded-md text-[11px] text-slate-300 border border-slate-800/80 flex items-center gap-2">
+                              <span className="w-4 h-4 rounded-full bg-amber-500/20 text-amber-300 text-[9px] font-bold flex items-center justify-center shrink-0">
+                                {idx + 1}
+                              </span>
+                              <span>{formatOsrmStepText(s)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* BOTOES DE AÇÃO E NAVEGAÇÃO GPS */}
                   <div className="grid grid-cols-2 gap-2 pt-1">
