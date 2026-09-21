@@ -38,7 +38,7 @@ services:
     restart: always
     ports:
       - "5001:5000"
-    command: osrm-routed --algorithm mld /data/nordeste-latest.osrm
+    command: osrm-routed --algorithm mld /data/paraiba-latest.osrm
     volumes:
       - ./osrm_data:/data
 
