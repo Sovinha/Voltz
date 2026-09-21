@@ -210,33 +210,26 @@ export default function MotoboyAppPage() {
     if (navigator.geolocation) {
       watchId = navigator.geolocation.watchPosition(
         (pos) => {
+          setGpsActive(true);
+          setGpsMsg(`GPS Hardware Ao Vivo (${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)})`);
           sendCurrentLocation(pos.coords.latitude, pos.coords.longitude);
         },
         (err) => {
           setGpsActive(true);
-          setGpsMsg('GPS HTTP / Transmissão Ativa');
-          // No Celular via HTTP, navegador bloqueia GPS Nativo. Envia coordenadas de rota/loja
-          const baseLat = selectedPedido?.latitude || -7.1155;
-          const baseLng = selectedPedido?.longitude || -34.8601;
-          sendCurrentLocation(baseLat, baseLng);
+          setGpsMsg('GPS HTTP / Ativo');
         },
-        { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 1000 }
       );
     } else {
-      setGpsMsg('GPS HTTP / Transmissão Ativa');
-      sendCurrentLocation(-7.1155, -34.8601);
+      setGpsMsg('GPS HTTP / Ativo');
     }
 
-    // Loop de garantia a cada 5 segundos
+    // Loop de garantia a cada 4 segundos
     const interval = setInterval(() => {
       if (lastCoords) {
         sendCurrentLocation(lastCoords.lat, lastCoords.lng);
-      } else {
-        const baseLat = selectedPedido?.latitude || -7.1155;
-        const baseLng = selectedPedido?.longitude || -34.8601;
-        sendCurrentLocation(baseLat, baseLng);
       }
-    }, 5000);
+    }, 4000);
 
     return () => {
       if (watchId !== null && navigator.geolocation) {
@@ -246,17 +239,22 @@ export default function MotoboyAppPage() {
     };
   }, [driver, isOnline, selectedPedido, lastCoords, sendCurrentLocation]);
 
-  // Transmite simulação de movimento (Passo a passo)
+  // Transmite movimento em rota (Loja -> Destino do Cliente)
   const handleSimularMovimentoGPS = () => {
-    const baseLat = selectedPedido?.latitude || -7.1145;
-    const baseLng = selectedPedido?.longitude || -34.8285;
-    const step = (simulatedOffset + 1) % 5;
+    const storeLat = -7.1155;
+    const storeLng = -34.8601;
+    const destLat = selectedPedido?.latitude || -7.1156;
+    const destLng = selectedPedido?.longitude || -34.8285;
+
+    const step = (simulatedOffset + 1) % 10;
     setSimulatedOffset(step);
 
-    const latDelta = (step - 2) * 0.0015;
-    const lngDelta = (step - 2) * 0.0015;
+    const ratio = step / 9; // Avança de 0.0 (Loja) a 1.0 (Endereço do Cliente)
+    const currLat = storeLat + (destLat - storeLat) * ratio;
+    const currLng = storeLng + (destLng - storeLng) * ratio;
 
-    sendCurrentLocation(baseLat + latDelta, baseLng + lngDelta);
+    setGpsMsg(`Deslocando em Rota (${Math.round(ratio * 100)}%)`);
+    sendCurrentLocation(currLat, currLng);
   };
 
   // Busca de Pedidos Alocados
