@@ -726,17 +726,17 @@ def geocode_address(address_str):
                 headers=headers,
                 timeout=1.5
             )
-            print(f"[GEOCODE DEBUG] q='{street_query}' -> status={r_street.status_code}, data={r_street.text[:100]}")
+            print(f"[GEOCODE DEBUG] q='{street_query}' -> status={r_street.status_code}, data={r_street.text[:100]}", flush=True)
             if r_street.status_code == 200:
                 d_street = r_street.json()
                 if d_street and len(d_street) > 0:
                     raw_lat = float(d_street[0]["lat"])
                     raw_lng = float(d_street[0]["lon"])
                     lat, lng = sanitize_coords(raw_lat, raw_lng)
-                    print(f"[GEOCODE RUA SUCESSO] '{street_query}' -> ({lat}, {lng})")
+                    print(f"[GEOCODE RUA SUCESSO] '{street_query}' -> ({lat}, {lng})", flush=True)
                     return lat, lng
     except Exception as e:
-        print(f"[GEOCODE WARN] Busca por rua exata indisponível: {e}")
+        print(f"[GEOCODE WARN] Busca por rua exata indisponível: {e}", flush=True)
 
     # 2. Casamento instantâneo por bairros caso a rua não seja encontrada no Nominatim (0.0001s)
     bairros_jp = [
