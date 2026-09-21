@@ -475,8 +475,9 @@ def webhook_cardapio_web():
         if raw_body:
             try:
                 data = json.loads(raw_body)
-            except Exception:
-                data = request.form.to_dict() or {}
+            except Exception as parse_err:
+                print(f"[AVISO JSON PARSE] Falha ao converter JSON: {parse_err}")
+                data = {}
 
         if not data:
             return jsonify({"error": "Payload JSON e obrigatorio"}), 400
