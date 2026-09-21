@@ -696,52 +696,31 @@ def geocode_address(address_str):
         return -7.1155, -34.8601
 
     addr_low = address_str.lower()
+    headers = {"User-Agent": "VoltzDeliveryApp/2.0"}
 
-    # 1. Tenta geocodificação de rua exata no Nominatim (timeout de 0.8s)
+    # 1. Tenta extrair o nome da rua (ex: "Rua João Vieira Carneiro" de "R. João Vieira Carneiro, 707 Pedro Gondim...")
     try:
-        query = address_str.strip()
-        clean_query = query
+        norm_addr = address_str.strip()
+        if norm_addr.lower().startswith("r.") or norm_addr.lower().startswith("r "):
+            norm_addr = "Rua " + norm_addr[2:].strip()
 
-        # Normaliza abreviação "R." ou "R " para "Rua "
-        if clean_query.lower().startswith("r.") or clean_query.lower().startswith("r "):
-            clean_query = "Rua " + clean_query[2:].strip()
-
-        # Remove CEP em parênteses "(58031-080)" e detalhes de complemento
-        clean_query = re.sub(r'\(.*?\)', '', clean_query).strip()
-        for noise in ["apt", "apto", "bloco", "ao lado", "proximo", "próximo", "ponto de referencia", "ref:", "casa"]:
-            if noise in clean_query.lower():
-                idx = clean_query.lower().find(noise)
-                clean_query = clean_query[:idx].strip(", -")
-
-        if "joão pessoa" not in clean_query.lower() and "joao pessoa" not in clean_query.lower():
-            clean_query += ", João Pessoa, PB, Brasil"
-
-        headers = {"User-Agent": "VoltzDeliveryApp/2.0"}
-        r = requests.get(
-            "https://nominatim.openstreetmap.org/search",
-            params={"q": clean_query, "format": "json", "limit": 1},
-            headers=headers,
-            timeout=0.8
-        )
-        if r.status_code == 200:
-            data = r.json()
-            if data and len(data) > 0:
-                raw_lat = float(data[0]["lat"])
-                raw_lng = float(data[0]["lon"])
-                lat, lng = sanitize_coords(raw_lat, raw_lng)
-                print(f"[GEOCODE RUA EXATA SUCESSO] '{clean_query}' -> ({lat}, {lng})")
-                return lat, lng
-
-        # Tenta a busca por rua + cidade se a query completa com número/bairro falhar
-        street_match = re.search(r'(rua|av|avenida|travessa|praça|prc)\s+([a-zA-Záàâãéèêíïóôõöúçñ\s]+)', clean_query, re.IGNORECASE)
+        # Extração inteligente do nome da via
+        street_match = re.search(r'(rua|av|avenida|travessa|praça|prc|alameda|rodovia)\s+([^,\n\(\)]+)', norm_addr, re.IGNORECASE)
         if street_match:
-            street_name = street_match.group(0).split(",")[0].strip()
-            street_query = f"{street_name}, João Pessoa, PB, Brasil"
+            raw_street = street_match.group(0).strip()
+            # Limpa números de imóveis colados ou bairros para isolar o nome da rua
+            clean_street = re.sub(r'\d+', '', raw_street).strip()
+            # Remove ruídos comuns no final do nome da rua
+            for noise in ["pedro gondim", "estados", "tambaú", "tambau", "manaíra", "manaira", "bessa", "cabo branco"]:
+                if noise in clean_street.lower():
+                    clean_street = clean_street[:clean_street.lower().find(noise)].strip(", -")
+
+            street_query = f"{clean_street}, João Pessoa, PB, Brasil"
             r_street = requests.get(
                 "https://nominatim.openstreetmap.org/search",
                 params={"q": street_query, "format": "json", "limit": 1},
                 headers=headers,
-                timeout=0.6
+                timeout=0.8
             )
             if r_street.status_code == 200:
                 d_street = r_street.json()
@@ -749,10 +728,10 @@ def geocode_address(address_str):
                     raw_lat = float(d_street[0]["lat"])
                     raw_lng = float(d_street[0]["lon"])
                     lat, lng = sanitize_coords(raw_lat, raw_lng)
-                    print(f"[GEOCODE NOME DA RUA SUCESSO] '{street_query}' -> ({lat}, {lng})")
+                    print(f"[GEOCODE RUA SUCESSO] '{street_query}' -> ({lat}, {lng})")
                     return lat, lng
     except Exception as e:
-        print(f"[GEOCODE WARN] Nominatim rua exata indisponível: {e}")
+        print(f"[GEOCODE WARN] Busca por rua exata indisponível: {e}")
 
     # 2. Casamento instantâneo por bairros caso a rua não seja encontrada no Nominatim (0.0001s)
     bairros_jp = [
