@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { supabase, isSupabaseConfigured, Pedido, OrdemStatus, Entregador } from '@/lib/supabase';
+import { getBackendUrl } from '@/lib/backend';
 import { OrderCard } from './OrderCard';
 import { CompactOrderBar } from './CompactOrderBar';
 import { MotoboySidebar } from './MotoboySidebar';
@@ -76,7 +77,7 @@ export const KanbanBoard: React.FC = () => {
       }
     } else {
       try {
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+        const backendUrl = getBackendUrl();
         const res = await fetch(`${backendUrl}/api/pedidos`);
         const local = getLocalOrders();
 
@@ -162,7 +163,7 @@ export const KanbanBoard: React.FC = () => {
       }
     } else {
       try {
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+        const backendUrl = getBackendUrl();
         await fetch(`${backendUrl}/api/pedidos/${id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -196,7 +197,7 @@ export const KanbanBoard: React.FC = () => {
       }
     } else {
       try {
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+        const backendUrl = getBackendUrl();
         await fetch(`${backendUrl}/api/pedidos/${id}`, {
           method: 'DELETE',
         });

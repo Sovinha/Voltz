@@ -23,6 +23,7 @@ import {
   Building2
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured, Pedido } from '@/lib/supabase';
+import { getBackendUrl } from '@/lib/backend';
 import { DriverData } from './CadastroMotoboyModal';
 
 export const AnalyticsTab: React.FC = () => {
@@ -41,7 +42,7 @@ export const AnalyticsTab: React.FC = () => {
   } | null>(null);
   const [isProcessingFechamento, setIsProcessingFechamento] = useState(false);
 
-  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+  const backendUrl = getBackendUrl();
 
   const fetchData = async () => {
     setLoading(true);

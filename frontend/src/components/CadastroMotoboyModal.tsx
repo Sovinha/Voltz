@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { UserPlus, Phone, Bike, X, Send } from 'lucide-react';
+import { getBackendUrl } from '@/lib/backend';
 
 export interface DriverData {
   id: string;
@@ -48,7 +49,7 @@ export const CadastroMotoboyModal: React.FC<CadastroMotoboyModalProps> = ({
     setLoading(true);
 
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+      const backendUrl = getBackendUrl();
       const res = await fetch(`${backendUrl}/api/entregadores`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

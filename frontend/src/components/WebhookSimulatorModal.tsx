@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Zap, Send, ShoppingBag, Globe, MapPin, X } from 'lucide-react';
-import { Pedido } from '@/lib/supabase';
+import { Zap, X, ShoppingBag, Globe, Sparkles, CheckCircle2, MapPin, Send } from 'lucide-react';
+import { supabase, isSupabaseConfigured, Pedido, OrdemOrigem } from '@/lib/supabase';
+import { getBackendUrl } from '@/lib/backend';
 
 interface WebhookSimulatorModalProps {
   isOpen: boolean;
@@ -101,7 +102,7 @@ export const WebhookSimulatorModal: React.FC<WebhookSimulatorModalProps> = ({
     };
 
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+      const backendUrl = getBackendUrl();
       const res = await fetch(`${backendUrl}/api/webhook/web`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

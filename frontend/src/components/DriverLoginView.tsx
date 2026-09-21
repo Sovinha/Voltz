@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { Truck, Phone, LogIn, ShieldCheck, Bike, ArrowRight, UserCheck } from 'lucide-react';
+import { getBackendUrl } from '@/lib/backend';
 import { DriverData } from './CadastroMotoboyModal';
 
 interface DriverLoginViewProps {
@@ -29,7 +30,7 @@ export const DriverLoginView: React.FC<DriverLoginViewProps> = ({
     setLoading(true);
 
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+      const backendUrl = getBackendUrl();
       const res = await fetch(`${backendUrl}/api/entregadores/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
