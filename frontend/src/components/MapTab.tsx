@@ -145,7 +145,7 @@ export const MapTab: React.FC = () => {
 
   useEffect(() => {
     fetchDrivers();
-    const interval = setInterval(fetchDrivers, 3500);
+    const interval = setInterval(fetchDrivers, 2000);
     return () => clearInterval(interval);
   }, []);
 
@@ -190,6 +190,8 @@ export const MapTab: React.FC = () => {
 
   useEffect(() => {
     fetchPedidos();
+    const interval = setInterval(fetchPedidos, 2000);
+    return () => clearInterval(interval);
   }, [fetchPedidos]);
 
   useEffect(() => {

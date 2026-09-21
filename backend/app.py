@@ -947,6 +947,66 @@ def realizar_fechamento_entregador(id_entregador):
     return jsonify(recibo), 200
 
 
+@app.route("/api/sistema/reset-total", methods=["POST", "DELETE"])
+def reset_sistema_total():
+    """
+    Zera completamente todos os pedidos e entregadores do banco de dados SQLite/Supabase.
+    Prepara o sistema do zero para início de testes com operação real.
+    """
+    if supabase:
+        try:
+            supabase.table("pedidos").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+            supabase.table("entregadores").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+        except Exception as e:
+            print(f"[AVISO Supabase Reset] {e}")
+
+    conn = get_db_connection()
+    conn.execute("DELETE FROM pedidos")
+    conn.execute("DELETE FROM entregadores")
+    conn.commit()
+    conn.close()
+
+    print("[SISTEMA RESET] Banco de dados completamente zerado para testes reais!")
+    return jsonify({
+        "status": "success",
+        "mensagem": "Sistema zerado com sucesso! Todos os pedidos e entregadores foram removidos para início dos testes reais."
+    }), 200
+
+
+@app.route("/api/entregadores/<id_entregador>", methods=["PATCH", "DELETE"])
+def gerenciar_entregador_individual(id_entregador):
+    """Atualiza ou remove um entregador específico da frota."""
+    conn = get_db_connection()
+
+    if request.method == "DELETE":
+        conn.execute("DELETE FROM entregadores WHERE id = ? OR nome = ?", (id_entregador, id_entregador))
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "success", "mensagem": f"Entregador {id_entregador} removido com sucesso!"}), 200
+
+    data = request.get_json(silent=True) or {}
+    fields = []
+    values = []
+
+    for key in ["nome", "telefone", "placa_veiculo", "status", "total_entregas", "frete_acumulado", "latitude", "longitude"]:
+        if key in data:
+            fields.append(f"{key} = ?")
+            values.append(data[key])
+
+    if not fields:
+        conn.close()
+        return jsonify({"error": "Nenhum campo fornecido para atualização"}), 400
+
+    values.append(id_entregador)
+    values.append(id_entregador)
+    sql = f"UPDATE entregadores SET {', '.join(fields)} WHERE id = ? OR nome = ?"
+    conn.execute(sql, tuple(values))
+    conn.commit()
+    conn.close()
+
+    return jsonify({"status": "success", "mensagem": "Dados do entregador atualizados com sucesso!"}), 200
+
+
 @app.route("/api/entregadores/reset", methods=["POST", "PUT"])
 def reset_entregadores_api():
     """Reseta a frota de entregadores para o estado padrão (disponível, frete e entregas zeradas)."""
