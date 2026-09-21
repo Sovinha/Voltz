@@ -745,13 +745,13 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
       });
 
       // Auto-fit bounds para incluir loja e motoboys ativos no mapa se houver pontos de motoboy
-      if (driverPoints.length > 0 && mapRef.current) {
+      if (driverPoints.length > 0 && mapInstanceRef.current) {
         try {
           const allBounds = L.latLngBounds([
             [loja.latitude, loja.longitude],
             ...driverPoints
           ]);
-          mapRef.current.fitBounds(allBounds, { padding: [50, 50], maxZoom: 15 });
+          mapInstanceRef.current.fitBounds(allBounds, { padding: [50, 50], maxZoom: 15 });
         } catch {}
       }
     }
