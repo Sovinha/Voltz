@@ -120,6 +120,7 @@ export const DriverTab: React.FC = () => {
     setIsSubmittingReset(true);
     const backendUrl = getBackendUrl();
     try {
+      localStorage.removeItem('local_simulated_pedidos');
       const res = await fetch(`${backendUrl}/api/sistema/reset-total`, { method: 'POST' });
       if (res.ok) {
         alert('🎉 Banco de dados zerado com sucesso! Prontos para testes com pedidos e entregadores reais.');

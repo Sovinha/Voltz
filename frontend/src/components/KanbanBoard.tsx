@@ -79,16 +79,12 @@ export const KanbanBoard: React.FC = () => {
       try {
         const backendUrl = getBackendUrl();
         const res = await fetch(`${backendUrl}/api/pedidos`);
-        const local = getLocalOrders();
 
         if (res.ok) {
           const data = await res.json();
-          // Evita duplicatas por ID
-          const existingIds = new Set(data.map((p: Pedido) => p.id));
-          const uniqueLocal = local.filter((p) => !existingIds.has(p.id));
-          setPedidos([...uniqueLocal, ...data]);
+          setPedidos(data);
         } else {
-          setPedidos(local);
+          setPedidos(getLocalOrders());
         }
       } catch (err) {
         console.error('Erro ao buscar pedidos do Flask local:', err);

@@ -170,14 +170,11 @@ export const MapTab: React.FC = () => {
       try {
         const backendUrl = getBackendUrl();
         const res = await fetch(`${backendUrl}/api/pedidos`);
-        const local = getLocalOrders();
         if (res.ok) {
           const data = await res.json();
-          const existingIds = new Set(data.map((p: Pedido) => p.id));
-          const uniqueLocal = local.filter((p) => !existingIds.has(p.id));
-          setPedidos([...uniqueLocal, ...data]);
+          setPedidos(data);
         } else {
-          setPedidos(local);
+          setPedidos(getLocalOrders());
         }
       } catch (err) {
         setPedidos(getLocalOrders());

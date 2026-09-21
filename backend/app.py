@@ -18,13 +18,18 @@ app = Flask(__name__)
 CORS(app)  # Permite requisições do frontend React / Next.js
 
 # Inicialização da Conexão com o Supabase (se disponível)
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 
-if not SUPABASE_URL or not SUPABASE_KEY:
-    print("[AVISO] SUPABASE_URL/KEY nao definidos. O sistema usara SQLite local (pedidos.db) como fallback!")
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
+if not SUPABASE_URL or not SUPABASE_KEY or "seu-projeto" in SUPABASE_URL or "sua-chave" in SUPABASE_KEY:
+    supabase = None
+    print("[AVISO] SUPABASE_URL/KEY nao definidos ou sao placeholders. Usando SQLite local (pedidos.db)!")
+else:
+    try:
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    except Exception as e:
+        supabase = None
+        print(f"[AVISO] Falha ao inicializar Supabase: {e}")
 
 DB_FILE = os.path.join(os.path.dirname(__file__), "pedidos.db")
 
@@ -674,32 +679,45 @@ def sanitize_coords(lat, lng):
 def geocode_address(address_str):
     """
     Converte um endereço textual em coordenadas (latitude, longitude) reais em João Pessoa/PB.
-    Tenta casamento instantâneo por bairros primeiro e faz fallback para Nominatim se necessário.
+    Tenta casamento instantâneo por bairros primeiro (0.0001s) e faz fallback seguro para Nominatim.
     """
     if not address_str or not isinstance(address_str, str):
         return -7.1155, -34.8601
 
     addr_low = address_str.lower()
 
-    # Casamento instantâneo por bairros de João Pessoa (0.001s)
-    if 'tambaú' in addr_low or 'tambau' in addr_low:
-        return -7.1156, -34.8285
-    elif 'manaíra' in addr_low or 'manaira' in addr_low:
-        return -7.0988, -34.8341
-    elif 'cabo branco' in addr_low:
-        return -7.1350, -34.8235
-    elif 'bessa' in addr_low:
-        return -7.0700, -34.8380
-    elif 'ipês' in addr_low or 'ipes' in addr_low or 'estados' in addr_low or 'pedro gondim' in addr_low:
-        return -7.1145, -34.8601
+    # Mapeamento rápido de bairros e regiões de João Pessoa / PB
+    bairros_jp = [
+        (('tambaú', 'tambau'), (-7.1156, -34.8285)),
+        (('tambauzinho',), (-7.1180, -34.8420)),
+        (('manaíra', 'manaira'), (-7.0988, -34.8341)),
+        (('cabo branco',), (-7.1350, -34.8235)),
+        (('bessa', 'aeroclube'), (-7.0700, -34.8380)),
+        (('jardim luna', 'luna'), (-7.1020, -34.8450)),
+        (('pedro gondim', 'estados', 'ipês', 'ipes', 'mesquita'), (-7.1145, -34.8601)),
+        (('expedicionários', 'expedicionarios'), (-7.1230, -34.8550)),
+        (('torre',), (-7.1220, -34.8650)),
+        (('centro', 'varadouro'), (-7.1190, -34.8820)),
+        (('jaguaribe',), (-7.1320, -34.8810)),
+        (('bancários', 'bancarios', 'conjunto bancarios'), (-7.1550, -34.8380)),
+        (('altiplano', 'portal do sol'), (-7.1420, -34.8180)),
+        (('mangabeira',), (-7.1700, -34.8350)),
+        (('cristo', 'água fria', 'agua fria'), (-7.1580, -34.8650)),
+        (('castelo branco',), (-7.1380, -34.8520)),
+        (('intermares', 'cabedelo'), (-7.0350, -34.8350)),
+    ]
+
+    for keywords, coords in bairros_jp:
+        if any(k in addr_low for k in keywords):
+            return coords
 
     try:
         query = address_str.strip()
         if "joão pessoa" not in query.lower() and "joao pessoa" not in query.lower():
             query += ", João Pessoa, PB, Brasil"
 
-        headers = {"User-Agent": "VoltzDeliveryApp/1.0"}
-        r = requests.get("https://nominatim.openstreetmap.org/search", params={"q": query, "format": "json", "limit": 1}, headers=headers, timeout=1)
+        headers = {"User-Agent": "VoltzDeliveryApp/2.0"}
+        r = requests.get("https://nominatim.openstreetmap.org/search", params={"q": query, "format": "json", "limit": 1}, headers=headers, timeout=0.5)
         if r.status_code == 200:
             data = r.json()
             if data and len(data) > 0:
