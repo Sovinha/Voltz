@@ -477,8 +477,6 @@ def webhook_cardapio_web():
                 data = json.loads(raw_body)
             except Exception:
                 data = request.form.to_dict() or {}
-        if not data:
-            data = request.get_json(silent=True) or {}
 
         if not data:
             return jsonify({"error": "Payload JSON e obrigatorio"}), 400
