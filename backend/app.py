@@ -501,8 +501,13 @@ def webhook_cardapio_web():
         req_lat = data.get("latitude")
         req_lng = data.get("longitude")
 
-        if req_lat is not None and req_lng is not None:
+        if req_lat is not None and req_lng is not None and float(req_lat) != 0:
             lat, lng = sanitize_coords(req_lat, req_lng)
+            # Se forem coordenadas genéricas de bairro/loja (-7.1145 / -7.1155), recarrega via geocodificação da rua exata
+            if abs(lat - (-7.1145)) < 0.002 and abs(lng - (-34.8601)) < 0.002:
+                exact_lat, exact_lng = geocode_address(addr)
+                if exact_lat is not None and exact_lng is not None:
+                    lat, lng = exact_lat, exact_lng
         else:
             lat, lng = geocode_address(addr)
 
