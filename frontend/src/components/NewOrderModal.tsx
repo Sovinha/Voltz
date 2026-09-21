@@ -91,23 +91,6 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({ isOpen, onClose, o
     setLoading(true);
     setErrorMsg('');
 
-    // Heurística de coordenadas precisas por bairro em João Pessoa
-    let latJP = -7.1156;
-    let lngJP = -34.8285;
-    const addrLow = endereco.toLowerCase();
-
-    if (addrLow.includes('tambaú') || addrLow.includes('tambau')) {
-      latJP = -7.1156; lngJP = -34.8285;
-    } else if (addrLow.includes('manaíra') || addrLow.includes('manaira')) {
-      latJP = -7.0988; lngJP = -34.8341;
-    } else if (addrLow.includes('cabo branco')) {
-      latJP = -7.1350; lngJP = -34.8235;
-    } else if (addrLow.includes('bessa')) {
-      latJP = -7.0700; lngJP = -34.8380;
-    } else if (addrLow.includes('pedro gondim') || addrLow.includes('estados')) {
-      latJP = -7.1145; lngJP = -34.8601;
-    }
-
     const finalTotal = valorTotalCustom !== null ? valorTotalCustom : Number(itemQtd) * Number(itemPreco);
 
     const newOrderPayload = {
@@ -117,8 +100,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({ isOpen, onClose, o
       nome_cliente: nomeCliente,
       telefone_cliente: telefone,
       endereco_entrega: endereco,
-      latitude: latJP,
-      longitude: lngJP,
+      latitude: null,
+      longitude: null,
       itens: [
         {
           nome: itemNome,

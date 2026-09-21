@@ -689,14 +689,45 @@ def sanitize_coords(lat, lng):
 def geocode_address(address_str):
     """
     Converte um endereço textual em coordenadas (latitude, longitude) reais em João Pessoa/PB.
-    Tenta casamento instantâneo por bairros primeiro (0.0001s) e faz fallback seguro para Nominatim.
+    Tenta busca de rua exata no Nominatim primeiro e faz fallback para o centro do bairro se necessário.
     """
     if not address_str or not isinstance(address_str, str):
         return -7.1155, -34.8601
 
     addr_low = address_str.lower()
 
-    # Mapeamento rápido de bairros e regiões de João Pessoa / PB
+    # 1. Tenta geocodificação de rua exata no Nominatim (timeout de 0.8s)
+    try:
+        query = address_str.strip()
+        # Limpa detalhes complementares (ex: Apt 804, Ao lado do..., Próximo a...) que prejudicam a busca textual no OSM
+        clean_query = query
+        for noise in ["apt", "apto", "bloco", "ao lado", "proximo", "próximo", "ponto de referencia", "ref:"]:
+            if noise in clean_query.lower():
+                idx = clean_query.lower().find(noise)
+                clean_query = clean_query[:idx].strip(", -")
+
+        if "joão pessoa" not in clean_query.lower() and "joao pessoa" not in clean_query.lower():
+            clean_query += ", João Pessoa, PB, Brasil"
+
+        headers = {"User-Agent": "VoltzDeliveryApp/2.0"}
+        r = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": clean_query, "format": "json", "limit": 1},
+            headers=headers,
+            timeout=0.8
+        )
+        if r.status_code == 200:
+            data = r.json()
+            if data and len(data) > 0:
+                raw_lat = float(data[0]["lat"])
+                raw_lng = float(data[0]["lon"])
+                lat, lng = sanitize_coords(raw_lat, raw_lng)
+                print(f"[GEOCODE RUA EXATA SUCESSO] '{clean_query}' -> ({lat}, {lng})")
+                return lat, lng
+    except Exception as e:
+        print(f"[GEOCODE WARN] Nominatim rua exata indisponível: {e}")
+
+    # 2. Casamento instantâneo por bairros caso a rua não seja encontrada no Nominatim (0.0001s)
     bairros_jp = [
         (('tambaú', 'tambau'), (-7.1156, -34.8285)),
         (('tambauzinho',), (-7.1180, -34.8420)),
@@ -720,24 +751,6 @@ def geocode_address(address_str):
     for keywords, coords in bairros_jp:
         if any(k in addr_low for k in keywords):
             return coords
-
-    try:
-        query = address_str.strip()
-        if "joão pessoa" not in query.lower() and "joao pessoa" not in query.lower():
-            query += ", João Pessoa, PB, Brasil"
-
-        headers = {"User-Agent": "VoltzDeliveryApp/2.0"}
-        r = requests.get("https://nominatim.openstreetmap.org/search", params={"q": query, "format": "json", "limit": 1}, headers=headers, timeout=0.5)
-        if r.status_code == 200:
-            data = r.json()
-            if data and len(data) > 0:
-                raw_lat = float(data[0]["lat"])
-                raw_lng = float(data[0]["lon"])
-                lat, lng = sanitize_coords(raw_lat, raw_lng)
-                print(f"[GEOCODE SUCESSO] '{address_str}' -> ({lat}, {lng})")
-                return lat, lng
-    except Exception as e:
-        print(f"[GEOCODE WARN] Falha na geocodificação de '{address_str}': {e}")
 
     return -7.1155, -34.8601
 
