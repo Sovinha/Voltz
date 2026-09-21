@@ -701,8 +701,10 @@ def geocode_address(address_str):
     # 1. Tenta extrair o nome da rua (ex: "Rua João Vieira Carneiro" de "R. João Vieira Carneiro, 707 Pedro Gondim...")
     try:
         norm_addr = address_str.strip()
-        norm_addr = re.sub(r'^[rR]\.\s*', 'Rua ', norm_addr)
-        norm_addr = re.sub(r'^[rR]\s+', 'Rua ', norm_addr)
+        if norm_addr.lower().startswith("r."):
+            norm_addr = "Rua " + norm_addr[2:].strip()
+        elif norm_addr.lower().startswith("r ") and not norm_addr.lower().startswith("rua "):
+            norm_addr = "Rua " + norm_addr[2:].strip()
         norm_addr = re.sub(r'\s+', ' ', norm_addr).strip()
 
         # Extração inteligente do nome da via
