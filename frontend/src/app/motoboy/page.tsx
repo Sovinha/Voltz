@@ -130,6 +130,7 @@ export default function MotoboyAppPage() {
       if (res.ok && data.entregador) {
         setDriver(data.entregador);
         setIsOnline(true);
+        setLastCoords({ lat: -7.1155, lng: -34.8601 });
         localStorage.setItem('motoboy_session', JSON.stringify(data.entregador));
       } else {
         setLoginError(data.error || 'Entregador não localizado. Tente selecionar abaixo.');
@@ -144,6 +145,7 @@ export default function MotoboyAppPage() {
   const handleSelectDriver = (d: DriverSession) => {
     setDriver(d);
     setIsOnline(true);
+    setLastCoords({ lat: -7.1155, lng: -34.8601 });
     localStorage.setItem('motoboy_session', JSON.stringify(d));
   };
 
@@ -630,7 +632,7 @@ export default function MotoboyAppPage() {
       <main className="max-w-md mx-auto p-4 space-y-4">
 
         {/* CONTROLE DE TRANSMISSÃO E SIMULAÇÃO DE GPS */}
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           <button
             onClick={() => {
               if (navigator.geolocation) {
@@ -642,18 +644,29 @@ export default function MotoboyAppPage() {
                 sendCurrentLocation(-7.1155, -34.8601);
               }
             }}
-            className="py-2.5 px-3 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 font-bold text-xs rounded-2xl transition flex items-center justify-center gap-1.5 shadow-md active:scale-98"
+            className="py-2.5 px-2 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 font-bold text-[11px] rounded-2xl transition flex items-center justify-center gap-1 shadow-md active:scale-98"
           >
             <Send className="w-3.5 h-3.5 text-amber-400" />
-            <span>📡 Transmitir GPS</span>
+            <span>📡 GPS Celular</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setLastCoords({ lat: -7.1155, lng: -34.8601 });
+              sendCurrentLocation(-7.1155, -34.8601);
+            }}
+            className="py-2.5 px-2 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 font-bold text-[11px] rounded-2xl transition flex items-center justify-center gap-1 shadow-md active:scale-98"
+          >
+            <MapPin className="w-3.5 h-3.5 text-emerald-400" />
+            <span>🏪 Na Loja</span>
           </button>
 
           <button
             onClick={handleSimularMovimentoGPS}
-            className="py-2.5 px-3 bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 font-bold text-xs rounded-2xl transition flex items-center justify-center gap-1.5 shadow-md active:scale-98"
+            className="py-2.5 px-2 bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 font-bold text-[11px] rounded-2xl transition flex items-center justify-center gap-1 shadow-md active:scale-98"
           >
             <Zap className="w-3.5 h-3.5 text-purple-400 animate-pulse" />
-            <span>⚡ Testar Movimento</span>
+            <span>⚡ Testar</span>
           </button>
         </div>
 
