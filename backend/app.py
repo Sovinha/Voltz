@@ -701,8 +701,9 @@ def geocode_address(address_str):
     # 1. Tenta extrair o nome da rua (ex: "Rua João Vieira Carneiro" de "R. João Vieira Carneiro, 707 Pedro Gondim...")
     try:
         norm_addr = address_str.strip()
-        if norm_addr.lower().startswith("r.") or norm_addr.lower().startswith("r "):
-            norm_addr = "Rua " + norm_addr[2:].strip()
+        norm_addr = re.sub(r'^[rR]\.\s*', 'Rua ', norm_addr)
+        norm_addr = re.sub(r'^[rR]\s+', 'Rua ', norm_addr)
+        norm_addr = re.sub(r'\s+', ' ', norm_addr).strip()
 
         # Extração inteligente do nome da via
         street_match = re.search(r'(rua|av|avenida|travessa|praça|prc|alameda|rodovia)\s+([^,\n\(\)]+)', norm_addr, re.IGNORECASE)
@@ -715,6 +716,7 @@ def geocode_address(address_str):
                 if noise in clean_street.lower():
                     clean_street = clean_street[:clean_street.lower().find(noise)].strip(", -")
 
+            clean_street = re.sub(r'\s+', ' ', clean_street).strip()
             street_query = f"{clean_street}, João Pessoa, PB, Brasil"
             r_street = requests.get(
                 "https://nominatim.openstreetmap.org/search",
