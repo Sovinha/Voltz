@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import sqlite3
 import uuid
 import urllib.parse
@@ -699,9 +700,15 @@ def geocode_address(address_str):
     # 1. Tenta geocodificação de rua exata no Nominatim (timeout de 0.8s)
     try:
         query = address_str.strip()
-        # Limpa detalhes complementares (ex: Apt 804, Ao lado do..., Próximo a...) que prejudicam a busca textual no OSM
         clean_query = query
-        for noise in ["apt", "apto", "bloco", "ao lado", "proximo", "próximo", "ponto de referencia", "ref:"]:
+
+        # Normaliza abreviação "R." ou "R " para "Rua "
+        if clean_query.lower().startswith("r.") or clean_query.lower().startswith("r "):
+            clean_query = "Rua " + clean_query[2:].strip()
+
+        # Remove CEP em parênteses "(58031-080)" e detalhes de complemento
+        clean_query = re.sub(r'\(.*?\)', '', clean_query).strip()
+        for noise in ["apt", "apto", "bloco", "ao lado", "proximo", "próximo", "ponto de referencia", "ref:", "casa"]:
             if noise in clean_query.lower():
                 idx = clean_query.lower().find(noise)
                 clean_query = clean_query[:idx].strip(", -")
