@@ -4,6 +4,7 @@ import re
 import sqlite3
 import uuid
 import urllib.parse
+import unicodedata
 from datetime import datetime
 import requests
 from flask import Flask, request, jsonify
@@ -692,6 +693,12 @@ def sanitize_coords(lat, lng):
     return round(lat, 6), round(lng, 6)
 
 
+def remove_accents(text):
+    if not text:
+        return ""
+    return ''.join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn')
+
+
 def geocode_address(address_str):
     """
     Converte um endereço textual em coordenadas (latitude, longitude) reais em João Pessoa/PB.
@@ -724,7 +731,8 @@ def geocode_address(address_str):
                     clean_street = clean_street[:clean_street.lower().find(noise)].strip(", -")
 
             clean_street = re.sub(r'\s+', ' ', clean_street).strip()
-            street_query = f"{clean_street}, João Pessoa, PB, Brasil"
+            clean_street_unaccented = remove_accents(clean_street)
+            street_query = f"{clean_street_unaccented}, Joao Pessoa, PB, Brasil"
             r_street = requests.get(
                 "https://nominatim.openstreetmap.org/search",
                 params={"q": street_query, "format": "json", "limit": 1},
