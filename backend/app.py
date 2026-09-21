@@ -724,6 +724,7 @@ def geocode_address(address_str):
                 headers=headers,
                 timeout=1.5
             )
+            print(f"[GEOCODE DEBUG] q='{street_query}' -> status={r_street.status_code}, data={r_street.text[:100]}")
             if r_street.status_code == 200:
                 d_street = r_street.json()
                 if d_street and len(d_street) > 0:
