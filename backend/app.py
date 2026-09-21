@@ -482,15 +482,25 @@ def webhook_cardapio_web():
         novo_id = str(uuid.uuid4())
         created_at_str = datetime.now().isoformat()
 
+        # Geocodificação e Sanitização Estrita de Coordenadas do Pedido
+        addr = str(data.get("endereco_entrega"))
+        req_lat = data.get("latitude")
+        req_lng = data.get("longitude")
+
+        if req_lat is not None and req_lng is not None:
+            lat, lng = sanitize_coords(req_lat, req_lng)
+        else:
+            lat, lng = geocode_address(addr)
+
         # Estruturação e Padronização do Pedido
         novo_pedido = {
             "id": novo_id,
             "origem": origem,
             "id_externo": str(data.get("id_externo")),
             "nome_cliente": str(data.get("nome_cliente")),
-            "endereco_entrega": str(data.get("endereco_entrega")),
-            "latitude": float(data.get("latitude")) if data.get("latitude") is not None else -23.550520,
-            "longitude": float(data.get("longitude")) if data.get("longitude") is not None else -46.633308,
+            "endereco_entrega": addr,
+            "latitude": lat,
+            "longitude": lng,
             "itens": data.get("itens"),
             "valor_total": float(data.get("valor_total")),
             "status": "pendente",
@@ -632,6 +642,79 @@ def login_entregador():
     else:
         return jsonify({"error": "Entregador não encontrado com este telefone. Solicite o cadastro ao operador da loja."}), 404
 
+
+
+def sanitize_coords(lat, lng):
+    """
+    Valida e corrige qualquer inversão acidental entre latitude e longitude.
+    Para João Pessoa / Paraíba (Hemisfério Sul/Oeste):
+    - Latitude deve estar entre -7.5 e -6.8
+    - Longitude deve estar entre -35.2 e -34.7
+    """
+    try:
+        lat = float(lat)
+        lng = float(lng)
+    except (ValueError, TypeError):
+        return -7.1155, -34.8601
+
+    # Se estiverem invertidas (lat ~ -34 e lng ~ -7)
+    if -36.0 <= lat <= -33.0 and -8.0 <= lng <= -6.0:
+        lat, lng = lng, lat
+
+    # Garante sinal negativo no Brasil
+    if lat > 0:
+        lat = -lat
+    if lng > 0:
+        lng = -lng
+
+    # Se fora dos limites da Paraíba/João Pessoa, ajusta para o centro
+    if not (-8.5 <= lat <= -6.0) or not (-36.0 <= lng <= -34.0):
+        lat = -7.1155
+        lng = -34.8601
+
+    return round(lat, 6), round(lng, 6)
+
+
+def geocode_address(address_str):
+    """
+    Converte um endereço textual em coordenadas (latitude, longitude) reais em João Pessoa/PB.
+    Tenta OpenStreetMap Nominatim e aplica sanitização estrita de coordenadas.
+    """
+    if not address_str or not isinstance(address_str, str):
+        return -7.1155, -34.8601
+
+    try:
+        query = address_str.strip()
+        if "joão pessoa" not in query.lower() and "joao pessoa" not in query.lower():
+            query += ", João Pessoa, PB, Brasil"
+
+        headers = {"User-Agent": "VoltzDeliveryApp/1.0"}
+        r = requests.get("https://nominatim.openstreetmap.org/search", params={"q": query, "format": "json", "limit": 1}, headers=headers, timeout=3)
+        if r.status_code == 200:
+            data = r.json()
+            if data and len(data) > 0:
+                raw_lat = float(data[0]["lat"])
+                raw_lng = float(data[0]["lon"])
+                lat, lng = sanitize_coords(raw_lat, raw_lng)
+                print(f"[GEOCODE SUCESSO] '{address_str}' -> ({lat}, {lng})")
+                return lat, lng
+    except Exception as e:
+        print(f"[GEOCODE WARN] Falha na geocodificação de '{address_str}': {e}")
+
+    # Heurística rápida por bairros de João Pessoa se Nominatim falhar
+    addr_low = address_str.lower()
+    if 'tambaú' in addr_low or 'tambau' in addr_low:
+        return -7.1156, -34.8285
+    elif 'manaíra' in addr_low or 'manaira' in addr_low:
+        return -7.0988, -34.8341
+    elif 'cabo branco' in addr_low:
+        return -7.1350, -34.8235
+    elif 'bessa' in addr_low:
+        return -7.0700, -34.8380
+    elif 'estados' in addr_low or 'pedro gondim' in addr_low:
+        return -7.1145, -34.8601
+
+    return -7.1155, -34.8601
 
 
 import math
@@ -782,8 +865,10 @@ def atualizar_localizacao_motoboy():
     data = request.get_json() or {}
     pedido_id = data.get("pedido_id")
     entregador_id = data.get("entregador_id")
-    lat = float(data.get("latitude", 0))
-    lng = float(data.get("longitude", 0))
+    raw_lat = data.get("latitude", 0)
+    raw_lng = data.get("longitude", 0)
+
+    lat, lng = sanitize_coords(raw_lat, raw_lng)
 
     if not lat or not lng:
         return jsonify({"error": "Latitude e Longitude são obrigatórias"}), 400
@@ -793,11 +878,11 @@ def atualizar_localizacao_motoboy():
     entregador_nome = data.get("entregador_nome")
     search_key = entregador_id or entregador_nome
 
-    # Atualiza localização do entregador no cadastro de entregadores
+    # Atualiza localização e ativa entregador no mapa
     if search_key:
         conn.execute("""
             UPDATE entregadores 
-            SET latitude = ?, longitude = ?, last_seen = ?, status = CASE WHEN status = 'pausa' OR status = 'offline' THEN status ELSE 'disponivel' END
+            SET latitude = ?, longitude = ?, last_seen = ?, status = CASE WHEN status = 'pausa' THEN 'pausa' ELSE CASE WHEN status = 'em_rota' THEN 'em_rota' ELSE 'disponivel' END END
             WHERE id = ? OR nome LIKE ?
         """, (lat, lng, now_str, search_key, f"%{search_key}%"))
 

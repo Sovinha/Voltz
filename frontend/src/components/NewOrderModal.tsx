@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Plus, ShoppingBag, Globe, CheckCircle2 } from 'lucide-react';
 import { supabase, isSupabaseConfigured, OrdemOrigem, Pedido } from '@/lib/supabase';
+import { getBackendUrl } from '@/lib/backend';
 
 interface NewOrderModalProps {
   isOpen: boolean;
@@ -90,9 +91,22 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({ isOpen, onClose, o
     setLoading(true);
     setErrorMsg('');
 
-    // Coordenadas padrão em Tambaú / João Pessoa
-    const latJP = -7.1150 + (Math.random() - 0.5) * 0.01;
-    const lngJP = -34.8250 + (Math.random() - 0.5) * 0.01;
+    // Heurística de coordenadas precisas por bairro em João Pessoa
+    let latJP = -7.1156;
+    let lngJP = -34.8285;
+    const addrLow = endereco.toLowerCase();
+
+    if (addrLow.includes('tambaú') || addrLow.includes('tambau')) {
+      latJP = -7.1156; lngJP = -34.8285;
+    } else if (addrLow.includes('manaíra') || addrLow.includes('manaira')) {
+      latJP = -7.0988; lngJP = -34.8341;
+    } else if (addrLow.includes('cabo branco')) {
+      latJP = -7.1350; lngJP = -34.8235;
+    } else if (addrLow.includes('bessa')) {
+      latJP = -7.0700; lngJP = -34.8380;
+    } else if (addrLow.includes('pedro gondim') || addrLow.includes('estados')) {
+      latJP = -7.1145; lngJP = -34.8601;
+    }
 
     const finalTotal = valorTotalCustom !== null ? valorTotalCustom : Number(itemQtd) * Number(itemPreco);
 
@@ -125,7 +139,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({ isOpen, onClose, o
 
       // 1. Tenta enviar para o backend Flask
       try {
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+        const backendUrl = getBackendUrl();
         const res = await fetch(`${backendUrl}/api/webhook/web`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

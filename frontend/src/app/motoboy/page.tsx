@@ -198,6 +198,11 @@ export default function MotoboyAppPage() {
       return;
     }
 
+    // Dispara pulso de GPS IMEDIATAMENTE ao entrar ou ficar online
+    const initLat = lastCoords?.lat || selectedPedido?.latitude || -7.1155;
+    const initLng = lastCoords?.lng || selectedPedido?.longitude || -34.8601;
+    sendCurrentLocation(initLat, initLng);
+
     // Tenta GPS nativo do dispositivo
     let watchId: number | null = null;
     if (navigator.geolocation) {
