@@ -14,4 +14,4 @@ COPY . .
 # Run database seed on startup if db does not exist, then start server
 EXPOSE 5000
 
-CMD ["sh", "-c", "python seed_data.py && gunicorn --workers 2 --threads 2 --timeout 120 --bind 0.0.0.0:5000 app:app"]
+CMD ["gunicorn", "--workers", "2", "--threads", "2", "--timeout", "120", "--bind", "0.0.0.0:5000", "app:app"]

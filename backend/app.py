@@ -507,47 +507,43 @@ def webhook_cardapio_web():
             "created_at": created_at_str
         }
 
-        # Salva no Supabase se configurado, caso contrário salva no SQLite local
-        if supabase:
-            # Remove id customizado para deixar Supabase gerar gen_random_uuid se for o caso
-            payload_supabase = {k: v for k, v in novo_pedido.items() if k != "id"}
-            response = supabase.table("pedidos").insert(payload_supabase).execute()
+        # 1. Salva INSTANTANEAMENTE no SQLite local (1ms) para nao travar a interface do usuario
+        tel_cliente = data.get("telefone_cliente", "")
+        conn = get_db_connection()
+        conn.execute("""
+            INSERT INTO pedidos (id, origem, id_externo, nome_cliente, telefone_cliente, endereco_entrega, latitude, longitude, itens, valor_total, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            novo_pedido["id"],
+            novo_pedido["origem"],
+            novo_pedido["id_externo"],
+            novo_pedido["nome_cliente"],
+            tel_cliente,
+            novo_pedido["endereco_entrega"],
+            novo_pedido["latitude"],
+            novo_pedido["longitude"],
+            json.dumps(novo_pedido["itens"]),
+            novo_pedido["valor_total"],
+            novo_pedido["status"],
+            novo_pedido["created_at"]
+        ))
+        conn.commit()
+        conn.close()
 
-            if hasattr(response, "data") and response.data:
-                pedido_criado = response.data[0]
-                print(f"[OK] Pedido recebido e inserido no Supabase! ID: {pedido_criado['id']}")
-                return jsonify({
-                    "mensagem": "Pedido recebido e padronizado com sucesso!",
-                    "pedido": pedido_criado
-                }), 201
-            else:
-                return jsonify({"error": "Falha ao inserir pedido no Supabase."}), 500
-        else:
-            conn = get_db_connection()
-            conn.execute("""
-                INSERT INTO pedidos (id, origem, id_externo, nome_cliente, endereco_entrega, latitude, longitude, itens, valor_total, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                novo_pedido["id"],
-                novo_pedido["origem"],
-                novo_pedido["id_externo"],
-                novo_pedido["nome_cliente"],
-                novo_pedido["endereco_entrega"],
-                novo_pedido["latitude"],
-                novo_pedido["longitude"],
-                json.dumps(novo_pedido["itens"]),
-                novo_pedido["valor_total"],
-                novo_pedido["status"],
-                novo_pedido["created_at"]
-            ))
-            conn.commit()
-            conn.close()
+        print(f"[OK] Pedido registrado instantaneamente no SQLite local! ID: {novo_pedido['id']}")
 
-            print(f"[OK] Pedido registrado no SQLite local! ID: {novo_pedido['id']}")
-            return jsonify({
-                "mensagem": "Pedido recebido e armazenado no SQLite local!",
-                "pedido": novo_pedido
-            }), 201
+        # 2. Tenta Supabase se configurado de forma nao-bloqueante
+        if supabase and SUPABASE_URL and "seu-projeto" not in SUPABASE_URL:
+            try:
+                payload_supabase = {k: v for k, v in novo_pedido.items() if k != "id"}
+                supabase.table("pedidos").insert(payload_supabase).execute()
+            except Exception as e:
+                print(f"[AVISO Supabase Inserção] {e}")
+
+        return jsonify({
+            "mensagem": "Pedido recebido e padronizado com sucesso!",
+            "pedido": novo_pedido
+        }), 201
 
     except Exception as e:
         print(f"[ERRO] Erro ao processar webhook: {str(e)}")
@@ -678,10 +674,24 @@ def sanitize_coords(lat, lng):
 def geocode_address(address_str):
     """
     Converte um endereço textual em coordenadas (latitude, longitude) reais em João Pessoa/PB.
-    Tenta OpenStreetMap Nominatim e aplica sanitização estrita de coordenadas.
+    Tenta casamento instantâneo por bairros primeiro e faz fallback para Nominatim se necessário.
     """
     if not address_str or not isinstance(address_str, str):
         return -7.1155, -34.8601
+
+    addr_low = address_str.lower()
+
+    # Casamento instantâneo por bairros de João Pessoa (0.001s)
+    if 'tambaú' in addr_low or 'tambau' in addr_low:
+        return -7.1156, -34.8285
+    elif 'manaíra' in addr_low or 'manaira' in addr_low:
+        return -7.0988, -34.8341
+    elif 'cabo branco' in addr_low:
+        return -7.1350, -34.8235
+    elif 'bessa' in addr_low:
+        return -7.0700, -34.8380
+    elif 'ipês' in addr_low or 'ipes' in addr_low or 'estados' in addr_low or 'pedro gondim' in addr_low:
+        return -7.1145, -34.8601
 
     try:
         query = address_str.strip()
@@ -689,7 +699,7 @@ def geocode_address(address_str):
             query += ", João Pessoa, PB, Brasil"
 
         headers = {"User-Agent": "VoltzDeliveryApp/1.0"}
-        r = requests.get("https://nominatim.openstreetmap.org/search", params={"q": query, "format": "json", "limit": 1}, headers=headers, timeout=3)
+        r = requests.get("https://nominatim.openstreetmap.org/search", params={"q": query, "format": "json", "limit": 1}, headers=headers, timeout=1)
         if r.status_code == 200:
             data = r.json()
             if data and len(data) > 0:
@@ -700,19 +710,6 @@ def geocode_address(address_str):
                 return lat, lng
     except Exception as e:
         print(f"[GEOCODE WARN] Falha na geocodificação de '{address_str}': {e}")
-
-    # Heurística rápida por bairros de João Pessoa se Nominatim falhar
-    addr_low = address_str.lower()
-    if 'tambaú' in addr_low or 'tambau' in addr_low:
-        return -7.1156, -34.8285
-    elif 'manaíra' in addr_low or 'manaira' in addr_low:
-        return -7.0988, -34.8341
-    elif 'cabo branco' in addr_low:
-        return -7.1350, -34.8235
-    elif 'bessa' in addr_low:
-        return -7.0700, -34.8380
-    elif 'estados' in addr_low or 'pedro gondim' in addr_low:
-        return -7.1145, -34.8601
 
     return -7.1155, -34.8601
 
