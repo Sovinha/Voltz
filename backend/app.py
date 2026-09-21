@@ -696,7 +696,7 @@ def geocode_address(address_str):
         return -7.1155, -34.8601
 
     addr_low = address_str.lower()
-    headers = {"User-Agent": "VoltzDeliveryApp/2.0"}
+    headers = {"User-Agent": "VoltzLogisticsSystem/3.0 (contact: admin@voltzdelivery.com.br)"}
 
     # 1. Tenta extrair o nome da rua (ex: "Rua João Vieira Carneiro" de "R. João Vieira Carneiro, 707 Pedro Gondim...")
     try:
@@ -722,7 +722,7 @@ def geocode_address(address_str):
                 "https://nominatim.openstreetmap.org/search",
                 params={"q": street_query, "format": "json", "limit": 1},
                 headers=headers,
-                timeout=0.8
+                timeout=1.5
             )
             if r_street.status_code == 200:
                 d_street = r_street.json()
