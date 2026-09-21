@@ -3,6 +3,7 @@
 import React from 'react';
 import { X, Truck, UserCheck, ShieldCheck, MapPin, Zap } from 'lucide-react';
 import { Pedido } from '@/lib/supabase';
+import { getBackendUrl } from '@/lib/backend';
 
 interface AlocarMotoboyModalProps {
   pedido: Pedido | null;
@@ -27,7 +28,7 @@ export const AlocarMotoboyModal: React.FC<AlocarMotoboyModalProps> = ({
     if (isOpen) {
       const fetchCouriers = async () => {
         try {
-          const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+          const backendUrl = getBackendUrl();
           const res = await fetch(`${backendUrl}/api/entregadores`);
           if (res.ok) {
             const data = await res.json();

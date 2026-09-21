@@ -27,6 +27,7 @@ import {
   Zap
 } from 'lucide-react';
 import { Pedido } from '@/lib/supabase';
+import { getBackendUrl } from '@/lib/backend';
 
 interface DriverSession {
   id: string;

@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { getBackendUrl } from '@/lib/backend';
 import { CadastroMotoboyModal, DriverData } from './CadastroMotoboyModal';
 
 export const DriverTab: React.FC = () => {
@@ -46,7 +47,7 @@ export const DriverTab: React.FC = () => {
   // Busca lista de entregadores cadastrados
   const fetchDrivers = useCallback(async () => {
     setLoading(true);
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+    const backendUrl = getBackendUrl();
     try {
       const res = await fetch(`${backendUrl}/api/entregadores`);
       if (res.ok) {
@@ -67,7 +68,7 @@ export const DriverTab: React.FC = () => {
 
   // Alterar Status do Entregador
   const handleUpdateStatus = async (driverId: string, newStatus: string) => {
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+    const backendUrl = getBackendUrl();
     try {
       const res = await fetch(`${backendUrl}/api/entregadores/${driverId}`, {
         method: 'PATCH',
@@ -85,7 +86,7 @@ export const DriverTab: React.FC = () => {
   // Deletar Entregador
   const handleDeleteDriver = async (driver: DriverData) => {
     if (!confirm(`Tem certeza que deseja remover o entregador "${driver.nome}" da frota?`)) return;
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+    const backendUrl = getBackendUrl();
     try {
       const res = await fetch(`${backendUrl}/api/entregadores/${driver.id}`, { method: 'DELETE' });
       if (res.ok) {
@@ -99,7 +100,7 @@ export const DriverTab: React.FC = () => {
   // Realizar Fechamento Financeiro / Quitação de Fretes
   const handleConfirmSettlement = async () => {
     if (!settlementDriver) return;
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+    const backendUrl = getBackendUrl();
     try {
       const res = await fetch(`${backendUrl}/api/entregadores/${settlementDriver.id}/fechamento`, { method: 'POST' });
       if (res.ok) {
@@ -117,7 +118,7 @@ export const DriverTab: React.FC = () => {
   // Limpeza Total do Banco de Dados para Testes Reais
   const handleResetTotalSistema = async () => {
     setIsSubmittingReset(true);
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+    const backendUrl = getBackendUrl();
     try {
       const res = await fetch(`${backendUrl}/api/sistema/reset-total`, { method: 'POST' });
       if (res.ok) {

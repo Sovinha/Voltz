@@ -614,6 +614,20 @@ def login_entregador():
 
     if row:
         entregador = dict(row)
+        # Ao realizar login, ativa status 'disponivel' e define coordenadas padrão se nulas para aparecer no mapa imediatamente
+        conn_up = get_db_connection()
+        lat_val = entregador.get("latitude") or -7.1155
+        lng_val = entregador.get("longitude") or -34.8601
+        conn_up.execute(
+            "UPDATE entregadores SET status = 'disponivel', latitude = ?, longitude = ? WHERE id = ?",
+            (lat_val, lng_val, entregador["id"])
+        )
+        conn_up.commit()
+        conn_up.close()
+
+        entregador["status"] = "disponivel"
+        entregador["latitude"] = lat_val
+        entregador["longitude"] = lng_val
         return jsonify({"status": "success", "entregador": entregador}), 200
     else:
         return jsonify({"error": "Entregador não encontrado com este telefone. Solicite o cadastro ao operador da loja."}), 404

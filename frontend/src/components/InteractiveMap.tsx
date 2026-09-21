@@ -5,6 +5,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Pedido, OrdemStatus } from '@/lib/supabase';
 import { checkIsPeakHour } from '@/lib/DispatchEngine';
+import { getBackendUrl } from '@/lib/backend';
 import { DriverData } from './CadastroMotoboyModal';
 import { Navigation, Bike, Car, Footprints, ListOrdered, ChevronDown, ChevronUp, Zap, Sparkles, CheckCircle2, ShieldCheck } from 'lucide-react';
 
@@ -182,7 +183,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
 
     const fetchSingleRoute = async () => {
       const waypoints = `${originLng},${originLat};${targetLng},${targetLat}`;
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+      const backendUrl = getBackendUrl();
       const urls = [
         `${backendUrl}/api/route?waypoints=${waypoints}&profile=${osrmProfile}&steps=true`,
         `https://router.project-osrm.org/route/v1/driving/${waypoints}?overview=full&geometries=geojson&steps=true`,
@@ -280,7 +281,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
 
       const waypoints = waypointsArr.join(';');
 
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+      const backendUrl = getBackendUrl();
       const urls = [
         `${backendUrl}/api/trip?waypoints=${waypoints}&source=first&roundtrip=${includeReturnLeg ? 'true' : 'false'}&profile=${osrmProfile}`,
         `${backendUrl}/api/route?waypoints=${waypoints}&profile=${osrmProfile}`,

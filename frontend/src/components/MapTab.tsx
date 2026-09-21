@@ -33,6 +33,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured, Pedido, OrdemStatus } from '@/lib/supabase';
+import { getBackendUrl } from '@/lib/backend';
 import { LojaConfig } from './InteractiveMap';
 import { StoreFormModal } from './StoreFormModal';
 import { OriginBadge } from './OriginBadge';
@@ -132,11 +133,11 @@ export const MapTab: React.FC = () => {
   // Buscar entregadores do backend
   const fetchDrivers = async () => {
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+      const backendUrl = getBackendUrl();
       const res = await fetch(`${backendUrl}/api/entregadores`);
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data) && data.length > 0) {
+        if (Array.isArray(data)) {
           setDrivers(data);
         }
       }
@@ -171,7 +172,7 @@ export const MapTab: React.FC = () => {
       }
     } else {
       try {
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+        const backendUrl = getBackendUrl();
         const res = await fetch(`${backendUrl}/api/pedidos`);
         const local = getLocalOrders();
         if (res.ok) {
@@ -213,7 +214,7 @@ export const MapTab: React.FC = () => {
     if (selectedOrders.length === 0) return;
 
     const optimizeBatchWithOsrm = async () => {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+      const backendUrl = getBackendUrl();
       const waypointsArr = [
         `${loja.longitude},${loja.latitude}`,
         ...selectedOrders.map((p) => {
@@ -296,7 +297,7 @@ export const MapTab: React.FC = () => {
 
     setIsAiLoading(true);
     setAiReasoning(null);
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+    const backendUrl = getBackendUrl();
 
     try {
       const response = await fetch(`${backendUrl}/api/ai/roteirizar`, {
@@ -431,7 +432,7 @@ export const MapTab: React.FC = () => {
       await supabase.from('pedidos').update({ status: newStatus }).eq('id', pedidoId);
     } else {
       try {
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+        const backendUrl = getBackendUrl();
         await fetch(`${backendUrl}/api/pedidos/${pedidoId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -454,7 +455,7 @@ export const MapTab: React.FC = () => {
       await supabase.from('pedidos').delete().eq('id', pedidoId);
     } else {
       try {
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+        const backendUrl = getBackendUrl();
         await fetch(`${backendUrl}/api/pedidos/${pedidoId}`, {
           method: 'DELETE',
         });
@@ -487,7 +488,7 @@ export const MapTab: React.FC = () => {
         .eq('id', pedidoId);
     } else {
       try {
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000';
+        const backendUrl = getBackendUrl();
         await fetch(`${backendUrl}/api/pedidos/${pedidoId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
