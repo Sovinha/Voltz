@@ -6,6 +6,7 @@ import urllib.parse
 from datetime import datetime
 import requests
 from flask import Flask, request, jsonify
+from werkzeug.exceptions import HTTPException
 
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -557,6 +558,8 @@ def webhook_cardapio_web():
             "pedido": novo_pedido
         }), 201
 
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[ERRO] Erro ao processar webhook: {str(e)}")
         return jsonify({
