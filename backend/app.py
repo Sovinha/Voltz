@@ -470,7 +470,13 @@ def webhook_cardapio_web():
     Recebe os dados do pedido, padroniza e salva no Supabase ou no SQLite local.
     """
     try:
-        data = request.get_json(silent=True) or request.get_json(force=True, silent=True) or {}
+        data = request.get_json(force=True, silent=True)
+        if not data:
+            try:
+                raw_body = request.get_data(as_text=True)
+                data = json.loads(raw_body) if raw_body else {}
+            except Exception:
+                data = {}
 
         if not data:
             return jsonify({"error": "Payload JSON e obrigatorio"}), 400
