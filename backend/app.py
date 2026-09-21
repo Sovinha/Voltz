@@ -731,6 +731,26 @@ def geocode_address(address_str):
                 lat, lng = sanitize_coords(raw_lat, raw_lng)
                 print(f"[GEOCODE RUA EXATA SUCESSO] '{clean_query}' -> ({lat}, {lng})")
                 return lat, lng
+
+        # Tenta a busca por rua + cidade se a query completa com número/bairro falhar
+        street_match = re.search(r'(rua|av|avenida|travessa|praça|prc)\s+([a-zA-Záàâãéèêíïóôõöúçñ\s]+)', clean_query, re.IGNORECASE)
+        if street_match:
+            street_name = street_match.group(0).split(",")[0].strip()
+            street_query = f"{street_name}, João Pessoa, PB, Brasil"
+            r_street = requests.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={"q": street_query, "format": "json", "limit": 1},
+                headers=headers,
+                timeout=0.6
+            )
+            if r_street.status_code == 200:
+                d_street = r_street.json()
+                if d_street and len(d_street) > 0:
+                    raw_lat = float(d_street[0]["lat"])
+                    raw_lng = float(d_street[0]["lon"])
+                    lat, lng = sanitize_coords(raw_lat, raw_lng)
+                    print(f"[GEOCODE NOME DA RUA SUCESSO] '{street_query}' -> ({lat}, {lng})")
+                    return lat, lng
     except Exception as e:
         print(f"[GEOCODE WARN] Nominatim rua exata indisponível: {e}")
 
