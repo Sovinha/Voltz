@@ -722,13 +722,22 @@ def generate_geocode_candidates(address_str):
         return []
 
     raw = address_str.strip()
-    raw = re.sub(r'\([^\)]*\)', '', raw)
-    for noise in ['apt', 'apto', 'bloco', 'ao lado', 'proximo', 'próximo', 'ponto de referencia', 'ref:', 'casa', 'loja', 'andar', 'edificio', 'ed.']:
-        if noise in raw.lower():
-            idx = raw.lower().find(noise)
-            raw = raw[:idx].strip(', -')
+    raw = re.sub(r'\([^\)]*\)', ' ', raw)
+
+    # Remove complementos e observações de entrega comuns no final do endereço
+    complement_patterns = [
+        r'\b(ap|apt|apto|apartamento|bloco|bl|res|residencial|ed|edificio|edifício)\b.*',
+        r'\b(por tr[aá]s|pr[oó]ximo|ao lado|em frente|frente|ref|refer[eê]ncia|ponto de refer[eê]ncia)\b.*',
+        r'\b(casa|loja|fundos|andar|pensionato|condominio|condom[ií]nio|quadra|lote)\b.*',
+    ]
+    for pattern in complement_patterns:
+        raw = re.sub(pattern, '', raw, flags=re.IGNORECASE)
 
     unaccented = remove_accents(raw).strip(', -')
+    unaccented = re.sub(r'\s+', ' ', unaccented).strip()
+    if not unaccented:
+        return []
+
     candidates = []
 
     # 1. Base clean query + Joao Pessoa
@@ -742,9 +751,9 @@ def generate_geocode_candidates(address_str):
     if 'brasil' not in c1.lower():
         candidates.append(f"{c1}, PB, Brasil")
 
-    # 3. Strip prefix (Rua, Avenida, Av, R, etc) so OSM isn't strictly type-bound
-    noprefix = re.sub(r'^(rua|av\.|avenida|r\.|tv\.|travessa|prc\.|praça|alameda)\s+', '', unaccented, flags=re.IGNORECASE).strip()
-    if noprefix:
+    # 3. Strip prefix (Rua, Avenida, Av, R, etc)
+    noprefix = re.sub(r'^(rua|av\.|avenida|r\.|tv\.|travessa|prc\.|praça|alameda|prof\.|professor|dr\.|doutor)\s+', '', unaccented, flags=re.IGNORECASE).strip()
+    if noprefix and noprefix != unaccented:
         if 'joao pessoa' in noprefix.lower():
             c3 = noprefix
         else:
@@ -752,22 +761,24 @@ def generate_geocode_candidates(address_str):
         if c3 not in candidates:
             candidates.append(c3)
 
-    # 4. Extract street name + house number
-    match_num = re.search(r'([A-Za-z\s]+)(?:,\s*|\s+)(\d+)', noprefix)
+    # 4. Extract street name + house number explicitly
+    match_num = re.search(r'([A-Za-z\s]+?)(?:,\s*|\s+)(\d+)', noprefix or unaccented)
     if match_num:
         st_name = match_num.group(1).strip()
         num_val = match_num.group(2).strip()
-        c4 = f"{st_name}, {num_val}, Joao Pessoa"
-        if c4 not in candidates:
-            candidates.append(c4)
+        if len(st_name) > 3:
+            c4 = f"{st_name}, {num_val}, Joao Pessoa"
+            if c4 not in candidates:
+                candidates.append(c4)
 
     # 5. Extract street name only
-    match_st = re.search(r'([A-Za-z\s]+)', noprefix)
+    match_st = re.search(r'([A-Za-z\s]+)', noprefix or unaccented)
     if match_st:
         st_name = match_st.group(1).strip()
-        c5 = f"{st_name}, Joao Pessoa"
-        if c5 not in candidates:
-            candidates.append(c5)
+        if len(st_name) > 3:
+            c5 = f"{st_name}, Joao Pessoa"
+            if c5 not in candidates:
+                candidates.append(c5)
 
     return candidates
 
@@ -800,11 +811,11 @@ def geocode_address(address_str):
         except Exception as e:
             print(f"[GEOCODE WARN] Candidato '{cand}' indisponível: {e}", file=sys.stderr, flush=True)
 
-    # Fallback por Bairros (Instantâneo 0.0001s)
+    # Fallback por Bairros com validação de limite de palavras (\b)
     addr_low = remove_accents(address_str).lower()
     bairros_jp = [
-        (('tambau',), (-7.1156, -34.8285)),
         (('tambauzinho',), (-7.1180, -34.8420)),
+        (('tambau',), (-7.1156, -34.8285)),
         (('manaira',), (-7.0988, -34.8341)),
         (('cabo branco',), (-7.1350, -34.8235)),
         (('bessa', 'aeroclube'), (-7.0700, -34.8380)),
@@ -823,9 +834,10 @@ def geocode_address(address_str):
     ]
 
     for keywords, coords in bairros_jp:
-        if any(k in addr_low for k in keywords):
-            print(f"[GEOCODE FALLBACK BAIRRO] '{address_str}' -> {coords}", file=sys.stderr, flush=True)
-            return coords
+        for k in keywords:
+            if re.search(r'\b' + re.escape(k) + r'\b', addr_low):
+                print(f"[GEOCODE FALLBACK BAIRRO] '{address_str}' -> {coords} (Match: '{k}')", file=sys.stderr, flush=True)
+                return coords
 
     return -7.1155, -34.8601
 
