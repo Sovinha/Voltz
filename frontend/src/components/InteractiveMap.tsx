@@ -173,6 +173,15 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   const [showEtaBadge, setShowEtaBadge] = useState<boolean>(false);
   const [currentBikeCoords, setCurrentBikeCoords] = useState<{ lat: number; lng: number } | null>(null);
 
+  // Estado do Menu de Contexto (Botão Direito no Mapa e nos Pinos)
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    lat: number;
+    lng: number;
+    pedido?: Pedido | null;
+  } | null>(null);
+
   // Sincronizar exibição sob demanda
   useEffect(() => {
     if (showEtaBadgeExternal !== undefined) {
@@ -443,6 +452,21 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
         maxZoom: 19,
       }).addTo(map);
 
+      // Evento de Botão Direito (Context Menu) no Mapa Livre
+      map.on('contextmenu', (e: L.LeafletMouseEvent) => {
+        e.originalEvent.preventDefault();
+        setContextMenu({
+          x: e.originalEvent.clientX,
+          y: e.originalEvent.clientY,
+          lat: e.latlng.lat,
+          lng: e.latlng.lng,
+          pedido: null,
+        });
+      });
+
+      map.on('click dragstart zoomstart', () => {
+        setContextMenu(null);
+      });
 
       tileLayerRef.current = tileLayer;
 
@@ -577,8 +601,49 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
         iconAnchor: [isBatchItem ? 36 : 30, 30],
       });
 
-      const marker = L.marker([lat, lng], { icon: orderIcon }).on('click', () => {
+      const marker = L.marker([lat, lng], { 
+        icon: orderIcon,
+        draggable: true,
+        title: `Pedido #${shortCode} - Arraste no mapa para reposicionar`
+      }).on('click', () => {
         onSelectPedido(p);
+      });
+
+      // Arraste do Pino (Drag & Drop) para ajuste fino instantâneo da localização no mapa
+      marker.on('dragend', async (e: L.DragEndEvent) => {
+        const newLatLng = e.target.getLatLng();
+        const newLat = parseFloat(newLatLng.lat.toFixed(6));
+        const newLng = parseFloat(newLatLng.lng.toFixed(6));
+
+        p.latitude = newLat;
+        p.longitude = newLng;
+
+        try {
+          const backendUrl = getBackendUrl();
+          await fetch(`${backendUrl}/api/pedidos/${p.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ latitude: newLat, longitude: newLng })
+          });
+          alert(`📍 Posição do pedido #${shortCode} de ${p.nome_cliente} ajustada para (${newLat}, ${newLng}) e salva!`);
+          if (onUpdateStatus) onUpdateStatus(p.id, p.status);
+        } catch (err) {
+          console.warn('Falha ao salvar localização no backend:', err);
+        }
+      });
+
+      // Clique com o Botão Direito no Pino (Context Menu Customizado do Pino)
+      marker.on('contextmenu', (e: L.LeafletMouseEvent) => {
+        L.DomEvent.stopPropagation(e.originalEvent);
+        e.originalEvent.preventDefault();
+        onSelectPedido(p);
+        setContextMenu({
+          x: e.originalEvent.clientX,
+          y: e.originalEvent.clientY,
+          lat: e.latlng.lat,
+          lng: e.latlng.lng,
+          pedido: p,
+        });
       });
 
       const popupHtml = `
@@ -1041,6 +1106,110 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* CONTEXT MENU FLUTUANTE DE BOTÃO DIREITO NO MAPA E NOS PINOS */}
+      {contextMenu && (
+        <div
+          style={{ top: `${Math.min(contextMenu.y, (typeof window !== 'undefined' ? window.innerHeight : 800) - 250)}px`, left: `${Math.min(contextMenu.x, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 260)}px` }}
+          className="fixed z-[9999] min-w-[250px] bg-slate-950/95 border border-slate-700/90 backdrop-blur-xl rounded-2xl shadow-2xl p-2 font-sans text-xs text-slate-100 space-y-1 animate-in fade-in zoom-in duration-150"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="px-3 py-1.5 border-b border-slate-800 text-[10px] uppercase font-bold text-slate-400 flex items-center justify-between">
+            <span>
+              {contextMenu.pedido ? `Pedido #${contextMenu.pedido.id_externo}` : '📌 Opções do Mapa'}
+            </span>
+            <button onClick={() => setContextMenu(null)} className="text-slate-500 hover:text-white p-0.5 rounded">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* Opção para mover o pino do pedido ativo para este ponto */}
+          {(contextMenu.pedido || selectedPedido) && (
+            <button
+              onClick={async () => {
+                const target = contextMenu.pedido || selectedPedido;
+                if (!target) return;
+                const newLat = parseFloat(contextMenu.lat.toFixed(6));
+                const newLng = parseFloat(contextMenu.lng.toFixed(6));
+
+                target.latitude = newLat;
+                target.longitude = newLng;
+
+                try {
+                  const backendUrl = getBackendUrl();
+                  await fetch(`${backendUrl}/api/pedidos/${target.id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ latitude: newLat, longitude: newLng })
+                  });
+                  alert(`📍 Pino do pedido #${target.id_externo} de ${target.nome_cliente} reposicionado para (${newLat}, ${newLng}) e salvo no banco!`);
+                  if (onUpdateStatus) onUpdateStatus(target.id, target.status);
+                } catch (err) {
+                  alert('Erro ao reposicionar o pino do pedido.');
+                }
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-3 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 font-extrabold flex items-center gap-2 border border-amber-500/30 transition"
+            >
+              <MapPin className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>📍 Mover pino do pedido para este ponto</span>
+            </button>
+          )}
+
+          {contextMenu.pedido && (
+            <>
+              <button
+                onClick={() => {
+                  if (onOpenAlocar && contextMenu.pedido) onOpenAlocar(contextMenu.pedido);
+                  setContextMenu(null);
+                }}
+                className="w-full text-left px-3 py-2 rounded-xl hover:bg-slate-800 text-purple-300 font-bold flex items-center gap-2 transition"
+              >
+                <Bike className="w-4 h-4 text-purple-400 shrink-0" />
+                <span>🛵 Alocar Entregador</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  if (onUpdateStatus && contextMenu.pedido) {
+                    const nextSt = contextMenu.pedido.status === 'pronto' ? 'preparo' : 'pronto';
+                    onUpdateStatus(contextMenu.pedido.id, nextSt);
+                  }
+                  setContextMenu(null);
+                }}
+                className="w-full text-left px-3 py-2 rounded-xl hover:bg-slate-800 text-emerald-300 font-bold flex items-center gap-2 transition"
+              >
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{contextMenu.pedido.status === 'pronto' ? 'Voltar para Preparo' : 'Marcar como Pronto'}</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  if (onOpenDetails && contextMenu.pedido) onOpenDetails(contextMenu.pedido);
+                  setContextMenu(null);
+                }}
+                className="w-full text-left px-3 py-2 rounded-xl hover:bg-slate-800 text-slate-200 font-medium flex items-center gap-2 transition"
+              >
+                <Eye className="w-4 h-4 text-sky-400 shrink-0" />
+                <span>👁️ Ver Detalhes do Pedido</span>
+              </button>
+            </>
+          )}
+
+          <button
+            onClick={() => {
+              const coordsStr = `${contextMenu.lat.toFixed(6)}, ${contextMenu.lng.toFixed(6)}`;
+              navigator.clipboard.writeText(coordsStr);
+              alert(`📋 Coordenadas copiadas: ${coordsStr}`);
+              setContextMenu(null);
+            }}
+            className="w-full text-left px-3 py-2 rounded-xl hover:bg-slate-800 text-slate-300 font-medium flex items-center gap-2 transition"
+          >
+            <Copy className="w-4 h-4 text-slate-400 shrink-0" />
+            <span>📋 Copiar Coordenadas ({contextMenu.lat.toFixed(4)}, {contextMenu.lng.toFixed(4)})</span>
+          </button>
         </div>
       )}
 

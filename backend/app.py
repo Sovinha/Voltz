@@ -503,31 +503,58 @@ def deletar_pedido(id_pedido):
 
 @app.route("/api/pedidos/<id_pedido>", methods=["PATCH"])
 def atualizar_status_pedido(id_pedido):
-    """Atualiza o status de um pedido (usado no modo local sem Supabase)."""
+    """
+    Atualiza campos de um pedido (status, latitude, longitude, entregador, etc.).
+    Permite ajuste fino de coordenadas e alteração de status em tempo real.
+    """
     data = request.get_json() or {}
-    novo_status = data.get("status")
-    
-    if not novo_status:
-        return jsonify({"error": "Campo status é obrigatório"}), 400
+    if not data:
+        return jsonify({"error": "Nenhum campo fornecido para atualização"}), 400
+
+    updatable_keys = [
+        "status", "latitude", "longitude", "endereco_entrega", 
+        "entregador_id", "entregador_nome", "codigo_confirmacao",
+        "motoboy_latitude", "motoboy_longitude"
+    ]
+
+    update_payload = {}
+    for k in updatable_keys:
+        if k in data:
+            update_payload[k] = data[k]
+
+    if "status" in data and data["status"] == "finalizado":
+        update_payload["motoboy_latitude"] = None
+        update_payload["motoboy_longitude"] = None
 
     if supabase:
         try:
-            update_payload = {"status": novo_status}
-            if novo_status == "finalizado":
-                update_payload["motoboy_latitude"] = None
-                update_payload["motoboy_longitude"] = None
-            res = supabase.table("pedidos").update(update_payload).eq("id", id_pedido).execute()
+            supabase.table("pedidos").update(update_payload).eq("id", id_pedido).execute()
         except Exception as e:
-            print(f"[AVISO Supabase] {e}")
+            print(f"[AVISO Supabase PATCH] {e}")
 
     conn = get_db_connection()
-    if novo_status == "finalizado":
-        conn.execute("UPDATE pedidos SET status = ?, motoboy_latitude = NULL, motoboy_longitude = NULL WHERE id = ? OR id_externo = ?", (novo_status, id_pedido, id_pedido))
-    else:
-        conn.execute("UPDATE pedidos SET status = ? WHERE id = ? OR id_externo = ?", (novo_status, id_pedido, id_pedido))
-    conn.commit()
+    set_clauses = []
+    values = []
+
+    for k, v in update_payload.items():
+        set_clauses.append(f"{k} = ?")
+        values.append(v)
+
+    if set_clauses:
+        values.append(id_pedido)
+        values.append(id_pedido)
+        sql = f"UPDATE pedidos SET {', '.join(set_clauses)} WHERE id = ? OR id_externo = ?"
+        conn.execute(sql, tuple(values))
+        conn.commit()
+
     conn.close()
-    return jsonify({"status": "success", "id": id_pedido, "novo_status": novo_status}), 200
+
+    print(f"[PATCH OK] Pedido {id_pedido} atualizado com sucesso: {update_payload}")
+    return jsonify({
+        "status": "success",
+        "id": id_pedido,
+        "atualizado": update_payload
+    }), 200
 
 
 @app.route("/api/webhook/web", methods=["POST"])
@@ -909,7 +936,33 @@ def geocode_address(address_str):
     # Extrair CEP e partes do endereço
     clean, cep, bairro = _extract_address_parts(address_str)
 
-    # Tentativa 0: Busca estruturada por CEP (mais precisa quando disponível)
+    # Tentativa 0-A: Consulta ViaCEP para obter o logradouro e bairro oficiais pelo CEP brasileiro
+    if cep:
+        try:
+            clean_cep = cep.replace("-", "").strip()
+            viacep_res = requests.get(f"https://viacep.com.br/ws/{clean_cep}/json/", timeout=2.5)
+            if viacep_res.status_code == 200:
+                vdata = viacep_res.json()
+                if not vdata.get("erro"):
+                    official_street = vdata.get("logradouro", "")
+                    official_bairro = vdata.get("bairro", "")
+                    official_city = vdata.get("localidade", "João Pessoa")
+
+                    num_match = re.search(r'(?:,\s*|\s+)(\d{1,5})(?:\s*[-,]|\s|$)', clean)
+                    hnum = num_match.group(1) if num_match else ""
+
+                    query_q = f"{official_street} {hnum}, {official_bairro}, {official_city}, PB, Brasil".strip()
+                    nom_res = requests.get("https://nominatim.openstreetmap.org/search", params={"q": query_q, "format": "json", "limit": 1}, headers=headers, timeout=3)
+                    if nom_res.status_code == 200:
+                        njson = nom_res.json()
+                        if njson and len(njson) > 0:
+                            lat, lng = sanitize_coords(njson[0]["lat"], njson[0]["lon"])
+                            print(f"[GEOCODE ViaCEP+Nominatim SUCESSO] '{query_q}' -> ({lat}, {lng})", file=sys.stderr, flush=True)
+                            return lat, lng
+        except Exception as e_vcep:
+            print(f"[GEOCODE WARN] Consulta ViaCEP indisponível: {e_vcep}", file=sys.stderr, flush=True)
+
+    # Tentativa 0-B: Busca estruturada por CEP direto no Nominatim
     if cep:
         try:
             r = requests.get(
