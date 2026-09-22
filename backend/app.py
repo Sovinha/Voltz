@@ -700,53 +700,77 @@ def remove_accents(text):
     return ''.join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn')
 
 
-def clean_address_for_nominatim(address_str):
+def generate_geocode_candidates(address_str):
     if not address_str or not isinstance(address_str, str):
-        return ""
-    q = address_str.strip()
-    # Expande abreviações de logradouro
-    q = re.sub(r'^[rR]\.\s*', 'Rua ', q)
-    q = re.sub(r'^[aA]v\.\s*', 'Avenida ', q)
-    q = re.sub(r'^[tT]v\.\s*', 'Travessa ', q)
-    q = re.sub(r'^[pP]ç\.\s*', 'Praça ', q)
-    q = re.sub(r'^[aA]lameda\.\s*', 'Alameda ', q)
-    
-    # Remove parênteses (ex: CEP, complementos entre parênteses)
-    q = re.sub(r'\([^\)]*\)', '', q)
-    
-    # Remove complementos comuns no final do endereço
+        return []
+
+    raw = address_str.strip()
+    raw = re.sub(r'\([^\)]*\)', '', raw)
     for noise in ['apt', 'apto', 'bloco', 'ao lado', 'proximo', 'próximo', 'ponto de referencia', 'ref:', 'casa', 'loja', 'andar', 'edificio', 'ed.']:
-        if noise in q.lower():
-            idx = q.lower().find(noise)
-            q = q[:idx].strip(', -')
-            
-    q_clean = remove_accents(q).strip(', -')
-    if "joao pessoa" not in q_clean.lower():
-        q_clean += ", Joao Pessoa"
-    if "pb" not in q_clean.lower():
-        q_clean += ", PB"
-    if "brasil" not in q_clean.lower():
-        q_clean += ", Brasil"
-    return q_clean
+        if noise in raw.lower():
+            idx = raw.lower().find(noise)
+            raw = raw[:idx].strip(', -')
+
+    unaccented = remove_accents(raw).strip(', -')
+    candidates = []
+
+    # 1. Base clean query + Joao Pessoa
+    if 'joao pessoa' in unaccented.lower():
+        c1 = unaccented
+    else:
+        c1 = f"{unaccented}, Joao Pessoa"
+    candidates.append(c1)
+
+    # 2. Base clean query + PB, Brasil
+    if 'brasil' not in c1.lower():
+        candidates.append(f"{c1}, PB, Brasil")
+
+    # 3. Strip prefix (Rua, Avenida, Av, R, etc) so OSM isn't strictly type-bound
+    noprefix = re.sub(r'^(rua|av\.|avenida|r\.|tv\.|travessa|prc\.|praça|alameda)\s+', '', unaccented, flags=re.IGNORECASE).strip()
+    if noprefix:
+        if 'joao pessoa' in noprefix.lower():
+            c3 = noprefix
+        else:
+            c3 = f"{noprefix}, Joao Pessoa"
+        if c3 not in candidates:
+            candidates.append(c3)
+
+    # 4. Extract street name + house number
+    match_num = re.search(r'([A-Za-z\s]+)(?:,\s*|\s+)(\d+)', noprefix)
+    if match_num:
+        st_name = match_num.group(1).strip()
+        num_val = match_num.group(2).strip()
+        c4 = f"{st_name}, {num_val}, Joao Pessoa"
+        if c4 not in candidates:
+            candidates.append(c4)
+
+    # 5. Extract street name only
+    match_st = re.search(r'([A-Za-z\s]+)', noprefix)
+    if match_st:
+        st_name = match_st.group(1).strip()
+        c5 = f"{st_name}, Joao Pessoa"
+        if c5 not in candidates:
+            candidates.append(c5)
+
+    return candidates
 
 
 def geocode_address(address_str):
     """
     Converte um endereço textual em coordenadas (latitude, longitude) reais com precisão de rua e número em João Pessoa/PB.
-    Utiliza Nominatim OSM com limpeza avançada do texto de endereço e fallback de bairros.
+    Testa candidatos sequenciais de busca com OpenStreetMap Nominatim e faz fallback gracioso para o bairro.
     """
     if not address_str or not isinstance(address_str, str):
         return -7.1155, -34.8601
 
     headers = {"User-Agent": "VoltzLogisticsSystem/3.0 (contact: admin@voltzdelivery.com.br)"}
+    candidates = generate_geocode_candidates(address_str)
 
-    # 1. Tentativa com Endereço Limpo Completo (Incluindo Número da Casa/Prédio)
-    try:
-        clean_q = clean_address_for_nominatim(address_str)
-        if clean_q:
+    for cand in candidates:
+        try:
             r = requests.get(
                 "https://nominatim.openstreetmap.org/search",
-                params={"q": clean_q, "format": "json", "limit": 1},
+                params={"q": cand, "format": "json", "limit": 1},
                 headers=headers,
                 timeout=1.5
             )
@@ -754,45 +778,12 @@ def geocode_address(address_str):
                 data = r.json()
                 if data and len(data) > 0:
                     lat, lng = sanitize_coords(data[0]["lat"], data[0]["lon"])
-                    print(f"[GEOCODE SUCESSO EXATO] '{clean_q}' -> ({lat}, {lng})", file=sys.stderr, flush=True)
+                    print(f"[GEOCODE SUCESSO] '{cand}' -> ({lat}, {lng})", file=sys.stderr, flush=True)
                     return lat, lng
-    except Exception as e:
-        print(f"[GEOCODE WARN] Busca exata indisponível: {e}", file=sys.stderr, flush=True)
+        except Exception as e:
+            print(f"[GEOCODE WARN] Candidato '{cand}' indisponível: {e}", file=sys.stderr, flush=True)
 
-    # 2. Tentativa Secundária: Isolamento do Nome da Rua (Sem número nem complemento)
-    try:
-        norm_addr = address_str.strip()
-        if norm_addr.lower().startswith("r."):
-            norm_addr = "Rua " + norm_addr[2:].strip()
-        elif norm_addr.lower().startswith("av."):
-            norm_addr = "Avenida " + norm_addr[3:].strip()
-        
-        street_match = re.search(r'(rua|av|avenida|travessa|praça|prc|alameda|rodovia)\s+([^,\n\(\)]+)', norm_addr, re.IGNORECASE)
-        if street_match:
-            raw_street = street_match.group(0).strip()
-            clean_street = re.sub(r'\d+', '', raw_street).strip()
-            for noise in ["pedro gondim", "estados", "tambaú", "tambau", "manaíra", "manaira", "bessa", "cabo branco"]:
-                if noise in clean_street.lower():
-                    clean_street = clean_street[:clean_street.lower().find(noise)].strip(", -")
-            clean_street_unaccented = remove_accents(clean_street).strip()
-            if clean_street_unaccented:
-                street_query = f"{clean_street_unaccented}, Joao Pessoa, PB, Brasil"
-                r_street = requests.get(
-                    "https://nominatim.openstreetmap.org/search",
-                    params={"q": street_query, "format": "json", "limit": 1},
-                    headers=headers,
-                    timeout=1.5
-                )
-                if r_street.status_code == 200:
-                    d_street = r_street.json()
-                    if d_street and len(d_street) > 0:
-                        lat, lng = sanitize_coords(d_street[0]["lat"], d_street[0]["lon"])
-                        print(f"[GEOCODE SUCESSO RUA] '{street_query}' -> ({lat}, {lng})", file=sys.stderr, flush=True)
-                        return lat, lng
-    except Exception as e:
-        print(f"[GEOCODE WARN] Busca por rua indisponível: {e}", file=sys.stderr, flush=True)
-
-    # 3. Fallback por Bairros (Instantâneo 0.0001s)
+    # Fallback por Bairros (Instantâneo 0.0001s)
     addr_low = remove_accents(address_str).lower()
     bairros_jp = [
         (('tambau',), (-7.1156, -34.8285)),
