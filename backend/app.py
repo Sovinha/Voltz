@@ -39,14 +39,17 @@ DB_FILE = os.path.join(os.path.dirname(__file__), "pedidos.db")
 
 
 def get_db_connection():
-    """Conecta ao banco de dados SQLite local."""
-    conn = sqlite3.connect(DB_FILE)
+    """Conecta ao banco de dados SQLite local com modo WAL para alta concorrência."""
+    conn = sqlite3.connect(DB_FILE, timeout=10.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=5000;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
     return conn
 
 
 def init_local_db():
-    """Inicializa as tabelas 'pedidos' e 'entregadores' no SQLite local."""
+    """Inicializa as tabelas 'pedidos' e 'entregadores' no SQLite local com índices de alta performance."""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -121,8 +124,11 @@ def init_local_db():
                 pass
 
 
-    # Não insere entregadores falsos padrão - frota inicia zerada para cadastro limpo
-
+    # Índices de Alta Performance para buscas rápidas no SQLite
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pedidos_status ON pedidos(status);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pedidos_created_at ON pedidos(created_at);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pedidos_id_externo ON pedidos(id_externo);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_entregadores_status ON entregadores(status);")
 
     conn.commit()
     conn.close()

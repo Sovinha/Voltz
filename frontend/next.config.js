@@ -2,7 +2,9 @@
 const nextConfig = {
   reactStrictMode: true,
   output: 'standalone',
+  compress: true,
+  swcMinify: true,
+  poweredByHeader: false,
 };
 
 module.exports = nextConfig;
-
