@@ -141,6 +141,23 @@ def init_local_db():
 init_local_db()
 
 
+@app.route("/", methods=["GET"])
+def index():
+    """Rota raiz amigável da API do Backend Voltz Logistics."""
+    return jsonify({
+        "status": "online",
+        "service": "Voltz Logistics System - Backend API",
+        "version": "3.0",
+        "frontend_url": "http://143.95.215.217:3002",
+        "endpoints": {
+            "health": "/api/health",
+            "pedidos": "/api/pedidos",
+            "webhook_web": "/api/webhook/web",
+            "entregadores": "/api/entregadores"
+        }
+    }), 200
+
+
 @app.route("/api/health", methods=["GET"])
 def health_check():
     """Rota de verificação de saúde da API."""
