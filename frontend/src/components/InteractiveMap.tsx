@@ -7,7 +7,8 @@ import { Pedido, OrdemStatus } from '@/lib/supabase';
 import { checkIsPeakHour } from '@/lib/DispatchEngine';
 import { getBackendUrl } from '@/lib/backend';
 import { DriverData } from './CadastroMotoboyModal';
-import { Navigation, Bike, Car, Footprints, ListOrdered, ChevronDown, ChevronUp, Zap, Sparkles, CheckCircle2, ShieldCheck, Eye, EyeOff } from 'lucide-react';
+import { Navigation, Bike, Car, Footprints, ListOrdered, ChevronDown, ChevronUp, Zap, Sparkles, CheckCircle2, ShieldCheck, Eye, EyeOff, MapPin, RotateCcw, MessageCircle, Copy, ExternalLink, X } from 'lucide-react';
+import { OriginBadge } from './OriginBadge';
 
 export interface OsrmStep {
   name: string;
@@ -384,6 +385,17 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     return () => clearInterval(interval);
   }, [isSimulating, singleOsrmPoints, batchOsrmPoints, showBatchRouteExternal, onSimulationEnd]);
 
+  // Centralização Suave (FlyTo) no Pedido Selecionado
+  useEffect(() => {
+    if (selectedPedido && selectedPedido.latitude && selectedPedido.longitude && mapInstanceRef.current) {
+      mapInstanceRef.current.flyTo(
+        [selectedPedido.latitude, selectedPedido.longitude],
+        16,
+        { animate: true, duration: 0.6 }
+      );
+    }
+  }, [selectedPedido]);
+
   const tileLayerRef = useRef<L.TileLayer | null>(null);
   const [mapStyle, setMapStyle] = useState<'dark' | 'osm' | 'streets' | 'satellite'>('osm');
 
@@ -544,19 +556,25 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
         : '';
 
       const orderIcon = L.divIcon({
-        className: 'custom-order-pill-marker',
+        className: 'custom-order-pill-marker cursor-pointer',
         html: `
-          <div class="flex flex-col items-center cursor-pointer transition-transform ${
-            isSelected ? 'scale-125 z-50' : 'hover:scale-110'
+          <div class="flex flex-col items-center cursor-pointer pointer-events-auto transition-all ${
+            isSelected ? 'scale-125 z-50 animate-bounce' : 'hover:scale-110 opacity-95'
           }">
-            <div class="px-2 py-0.5 rounded bg-sky-600 text-white text-xs font-mono font-bold shadow-xl border border-white/20 flex items-center justify-center whitespace-nowrap">
+            <div class="px-2.5 py-1 rounded-xl ${
+              isSelected
+                ? 'bg-amber-500 text-slate-950 font-black shadow-2xl border-2 border-white ring-4 ring-amber-400/50'
+                : 'bg-sky-600 text-white font-bold shadow-xl border border-white/30'
+            } text-xs font-mono flex items-center justify-center whitespace-nowrap">
               ${stopLabel}${shortCode}
             </div>
-            <div class="w-0 h-0 border-l-[4px] border-r-[4px] border-t-[5px] border-l-transparent border-r-transparent border-t-sky-600 -mt-0.5"></div>
+            <div class="w-0 h-0 border-l-[5px] border-r-[5px] border-t-[6px] border-l-transparent border-r-transparent ${
+              isSelected ? 'border-t-amber-500' : 'border-t-sky-600'
+            } -mt-0.5"></div>
           </div>
         `,
-        iconSize: [isBatchItem ? 68 : 55, 30],
-        iconAnchor: [isBatchItem ? 34 : 27, 28],
+        iconSize: [isBatchItem ? 72 : 60, 32],
+        iconAnchor: [isBatchItem ? 36 : 30, 30],
       });
 
       const marker = L.marker([lat, lng], { icon: orderIcon }).on('click', () => {
@@ -926,6 +944,102 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* Card Flutuante de Manipulação Rápida e Didática do Pedido Selecionado */}
+      {selectedPedido && (
+        <div className="absolute bottom-4 left-3 right-3 z-[600] max-w-3xl mx-auto bg-slate-900/95 backdrop-blur-xl border border-sky-500/50 rounded-2xl p-3 shadow-2xl animate-in slide-in-from-bottom-5 duration-200">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            {/* Informações Didáticas do Pedido */}
+            <div className="flex-1 min-w-0 space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-mono text-sm font-black text-amber-400 bg-slate-950 px-2.5 py-0.5 rounded-lg border border-amber-500/30">
+                  #{selectedPedido.id_externo}
+                </span>
+                <span className="text-xs font-extrabold text-white truncate max-w-[180px]">
+                  {selectedPedido.nome_cliente}
+                </span>
+                <OriginBadge origem={selectedPedido.origem} />
+                <span className="text-[10px] uppercase font-mono font-bold px-2 py-0.5 rounded-md bg-slate-800 text-slate-300">
+                  {selectedPedido.status}
+                </span>
+                <span className="text-xs font-mono font-bold text-emerald-400 ml-auto sm:ml-0">
+                  R$ {selectedPedido.valor_total.toFixed(2)}
+                </span>
+              </div>
+
+              <p className="text-xs text-slate-300 truncate font-medium flex items-center gap-1">
+                <MapPin className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                <span>{selectedPedido.endereco_entrega}</span>
+              </p>
+            </div>
+
+            {/* Botões Didáticos de Ação Rápida (Um Clique) */}
+            <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+              <button
+                onClick={() => onOpenAlocar && onOpenAlocar(selectedPedido)}
+                className="px-3 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-xs shadow-lg transition-all flex items-center gap-1.5 active:scale-95 border border-purple-400/30"
+              >
+                <Bike className="w-4 h-4" />
+                <span>Alocar Motoboy</span>
+              </button>
+
+              {selectedPedido.status === 'pronto' ? (
+                <button
+                  onClick={() => onUpdateStatus && onUpdateStatus(selectedPedido.id, 'preparo')}
+                  className="px-3 py-2 rounded-xl bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 font-extrabold text-xs shadow-lg border border-amber-500/40 transition-all flex items-center gap-1.5 active:scale-95"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  <span>Voltar Preparo</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => onUpdateStatus && onUpdateStatus(selectedPedido.id, 'pronto')}
+                  className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs shadow-lg transition-all flex items-center gap-1.5 active:scale-95 border border-emerald-400/30"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Marcar Pronto</span>
+                </button>
+              )}
+
+              <button
+                onClick={() => onOpenDetails && onOpenDetails(selectedPedido)}
+                className="px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs shadow transition-all flex items-center gap-1 border border-slate-700"
+                title="Ver detalhes do pedido"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Detalhes</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  const tel = selectedPedido.telefone_cliente?.replace(/[^0-9]/g, '');
+                  if (tel) {
+                    window.open(`https://wa.me/55${tel}?text=${encodeURIComponent(`Olá ${selectedPedido.nome_cliente}, seu pedido #${selectedPedido.id_externo} da Trattoria Express está a caminho!`)}`, '_blank');
+                  } else {
+                    alert('Telefone do cliente não informado!');
+                  }
+                }}
+                className="p-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/30 text-xs font-bold transition-all"
+                title="Abrir conversa no WhatsApp"
+              >
+                <MessageCircle className="w-4 h-4" />
+              </button>
+
+              <button
+                onClick={() => {
+                  const trackingUrl = `${window.location.origin}/tracking?id=${selectedPedido.id_externo}`;
+                  navigator.clipboard.writeText(trackingUrl);
+                  alert(`✅ Link de rastreamento copiado!\n\n${trackingUrl}`);
+                }}
+                className="p-2 rounded-xl bg-sky-500/15 hover:bg-sky-500/30 text-sky-400 border border-sky-500/30 text-xs font-bold transition-all"
+                title="Copiar link de rastreamento"
+              >
+                <Copy className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
       )}
