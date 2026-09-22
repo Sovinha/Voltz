@@ -121,17 +121,8 @@ def init_local_db():
                 pass
 
 
-    cursor.execute("SELECT COUNT(*) FROM entregadores")
-    if cursor.fetchone()[0] == 0:
-        default_drivers = [
-            (str(uuid.uuid4()), "ANDERSON (Moto 01)", "83999112233", "MOP-1001", "disponivel", 5, 42.50, datetime.now().isoformat()),
-            (str(uuid.uuid4()), "ROBERTO (Moto 04)", "83999223344", "MOP-2004", "em_rota", 7, 58.00, datetime.now().isoformat()),
-            (str(uuid.uuid4()), "CARLOS (Moto 07)", "83999334455", "MOP-3007", "disponivel", 4, 34.00, datetime.now().isoformat())
-        ]
-        cursor.executemany("""
-            INSERT INTO entregadores (id, nome, telefone, placa_veiculo, status, total_entregas, frete_acumulado, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, default_drivers)
+    # Não insere entregadores falsos padrão - frota inicia zerada para cadastro limpo
+
 
     conn.commit()
     conn.close()
@@ -1487,14 +1478,20 @@ def gerenciar_entregador_individual(id_entregador):
     return jsonify({"status": "success", "mensagem": "Dados do entregador atualizados com sucesso!"}), 200
 
 
-@app.route("/api/entregadores/reset", methods=["POST", "PUT"])
+@app.route("/api/entregadores/reset", methods=["POST", "PUT", "DELETE"])
 def reset_entregadores_api():
-    """Reseta a frota de entregadores para o estado padrão (disponível, frete e entregas zeradas)."""
+    """Zera e deleta 100% da frota de entregadores para permitir cadastro limpo do zero."""
+    if supabase:
+        try:
+            supabase.table("entregadores").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+        except Exception as e:
+            print(f"[AVISO] Falha ao resetar entregadores no Supabase: {e}")
+
     conn = get_db_connection()
-    conn.execute("UPDATE entregadores SET status = 'disponivel', frete_acumulado = 0.0, total_entregas = 0")
+    conn.execute("DELETE FROM entregadores")
     conn.commit()
     conn.close()
-    return jsonify({"status": "success", "message": "Frota de entregadores resetada com sucesso!"}), 200
+    return jsonify({"status": "success", "message": "Todos os entregadores foram deletados! Cadastro zerado."}), 200
 
 
 @app.route("/api/pedidos/reset", methods=["POST", "DELETE"])

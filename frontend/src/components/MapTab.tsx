@@ -43,6 +43,8 @@ import { WebhookSimulatorModal } from './WebhookSimulatorModal';
 import { PedidoExpedicaoModal } from './PedidoExpedicaoModal';
 import { CadastroMotoboyModal, DriverData } from './CadastroMotoboyModal';
 import { NewOrderModal } from './NewOrderModal';
+import { EditPedidoModal } from './EditPedidoModal';
+import { CompactOrderBar } from './CompactOrderBar';
 import { checkIsPeakHour, analyzeFleetAndSLARisks, SLARiskAlert } from '@/lib/DispatchEngine';
 
 const InteractiveMap = dynamic(
@@ -68,6 +70,7 @@ export const MapTab: React.FC = () => {
   const [expedicaoPedido, setExpedicaoPedido] = useState<Pedido | null>(null);
   const [isCadastroMotoboyOpen, setIsCadastroMotoboyOpen] = useState(false);
   const [isNewOrderModalOpen, setIsNewOrderModalOpen] = useState(false);
+  const [editingPedido, setEditingPedido] = useState<Pedido | null>(null);
 
   // Aba ativa do Console Lateral ('pedidos' | 'frota')
   const [activeConsoleTab, setActiveConsoleTab] = useState<'pedidos' | 'frota'>('pedidos');
@@ -773,6 +776,7 @@ export const MapTab: React.FC = () => {
               onUpdateStatus={handleUpdateStatus}
               onOpenAlocar={(p) => setAlocarModalPedido(p)}
               onOpenDetails={(p) => setDetalhesModalPedido(p)}
+              onEditPedido={(p) => setEditingPedido(p)}
             />
           </div>
         </div>
@@ -904,175 +908,32 @@ export const MapTab: React.FC = () => {
                 </div>
               )}
 
-              {/* Lista Rolável de Cards Enriquecidos de Pedidos */}
+              {/* Lista Rolável de Pedidos em Formato Resumido Compacto (Print 2) */}
               <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
                 {filteredPedidos.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-slate-500 text-xs text-center py-8">
                     <p>Seus pedidos vão aparecer aqui.</p>
                   </div>
                 ) : (
-                  filteredPedidos.map((p) => {
-                    const batchIndex = orderedBatch.findIndex((bp) => bp.id === p.id);
-                    const isChecked = batchIndex >= 0;
-                    const isSelected = selectedPedido?.id === p.id;
-                    const etaInfo = getDeliveryETAInfo(p.created_at, p.latitude, p.longitude);
-
-                    const motoboyNome = p.entregador_nome
-                      ? p.entregador_nome
-                      : p.status === 'alocado' || p.status === 'em_rota'
-                      ? 'Anderson (Alocado)'
-                      : null;
-
-                    const waUrl = p.telefone_cliente
-                      ? `https://wa.me/55${p.telefone_cliente.replace(/\D/g, '')}?text=${encodeURIComponent(
-                          `Olá ${p.nome_cliente}! 🛵 Acompanhe seu pedido #${p.id_externo} em tempo real: http://localhost:3000/rastreio/${p.id} ${p.codigo_confirmacao ? `(PIN: ${p.codigo_confirmacao})` : ''}`
-                        )}`
-                      : null;
-
-                    return (
-                      <div
-                        key={p.id}
-                        className={`w-full p-3 rounded-xl border text-xs transition-all space-y-2.5 ${
-                          isChecked
-                            ? 'bg-amber-500/20 border-amber-500/80 text-slate-100 shadow ring-1 ring-amber-500/50'
-                            : !isBatchMode && isSelected
-                            ? 'bg-purple-600/20 border-purple-500/60 text-slate-100 shadow'
-                            : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:border-amber-500/50 hover:bg-slate-900/80'
-                        }`}
-                      >
-                        {/* Linha Superior: Nome do Cliente + ID + Origem + PIN */}
-                        <div
-                          onClick={() => {
-                            if (isBatchMode) {
-                              toggleBatchSelect(p.id);
-                            } else {
-                              setSelectedPedido(p);
-                              setShowSingleRoute(true);
-                            }
-                          }}
-                          className="flex items-center justify-between gap-2 cursor-pointer"
-                        >
-                          <div className="flex items-center gap-2 truncate pr-1">
-                            {isBatchMode && (
-                              <div className={`w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-black shrink-0 transition-colors ${
-                                isChecked ? 'bg-amber-500 text-slate-950 font-black' : 'border border-slate-700 bg-slate-950 text-transparent'
-                              }`}>
-                                {isChecked ? `#${batchIndex + 1}` : ''}
-                              </div>
-                            )}
-
-                            <div className="truncate">
-                              <strong className="block text-slate-100 truncate font-extrabold text-xs">
-                                {p.nome_cliente}
-                              </strong>
-                              <span className="text-[10px] text-slate-400 font-mono">
-                                #{p.id_externo} • <span className="uppercase text-amber-400 font-bold">{p.status}</span>
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            {p.codigo_confirmacao && (
-                              <span className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-[10px] font-mono font-bold text-amber-300">
-                                PIN:{p.codigo_confirmacao}
-                              </span>
-                            )}
-                            <OriginBadge origem={p.origem} />
-                          </div>
-                        </div>
-
-                        {/* Linha Central: Previsão de Horário & Status SLA do Prazo */}
-                        <div className="flex items-center justify-between text-[11px] font-mono bg-slate-900/90 px-2.5 py-1.5 rounded-lg border border-slate-800/80">
-                          <div className="flex items-center gap-1.5 text-slate-300">
-                            <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                            <span>Entrega: <strong className="text-amber-400">{etaInfo.timeStr}</strong> <span className="text-slate-500">({etaInfo.remainMin > 0 ? `${etaInfo.remainMin}m` : 'Esgotado'})</span></span>
-                          </div>
-
-                          <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${etaInfo.slaBadgeClass}`}>
-                            {etaInfo.slaLabel}
-                          </span>
-                        </div>
-
-                        {/* Linha de Informações do Motoboy & Distância */}
-                        <div className="flex items-center justify-between text-[11px]">
-                          <div className="flex items-center gap-1.5 truncate pr-2">
-                            <Bike className={`w-3.5 h-3.5 shrink-0 ${motoboyNome ? 'text-purple-400 animate-pulse' : 'text-slate-600'}`} />
-                            <span className="text-slate-400 font-medium">Motoboy:</span>
-                            <strong className={`truncate font-bold ${motoboyNome ? 'text-purple-300' : 'text-slate-500 font-normal'}`}>
-                              {motoboyNome || 'Pendente'}
-                            </strong>
-                          </div>
-
-                          <span className="text-sky-400 font-mono text-[10px] font-bold shrink-0">
-                            {etaInfo.distKm.toFixed(1)} km
-                          </span>
-                        </div>
-
-                        {/* BARRA DE AÇÕES RÁPIDAS DE 1-CLIQUE PARA O HORÁRIO DE PICO */}
-                        <div className="pt-2 border-t border-slate-800/80 grid grid-cols-4 gap-1">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setAlocarModalPedido(p);
-                            }}
-                            className="py-1 px-1.5 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition"
-                            title="Alocar Motoboy"
-                          >
-                            <Bike className="w-3 h-3" />
-                            <span>Alocar</span>
-                          </button>
-
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setExpedicaoPedido(p);
-                            }}
-                            className="py-1 px-1.5 bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 border border-sky-500/30 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition"
-                            title="Imprimir Comprovante Térmico"
-                          >
-                            <Printer className="w-3 h-3" />
-                            <span>Térmica</span>
-                          </button>
-
-                          {waUrl ? (
-                            <a
-                              href={waUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                              className="py-1 px-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition"
-                              title="Enviar WhatsApp com Rastreio"
-                            >
-                              <span>📲 Zap</span>
-                            </a>
-                          ) : (
-                            <button
-                              disabled
-                              className="py-1 px-1.5 bg-slate-900 text-slate-600 border border-slate-800 rounded-lg text-[10px] font-bold opacity-50 cursor-not-allowed"
-                            >
-                              📲 Zap
-                            </button>
-                          )}
-
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedPedido(p);
-                              setShowSingleRoute(true);
-                              if (p.latitude && p.longitude) {
-                                setAnimatingCoords({ lat: p.latitude, lng: p.longitude });
-                              }
-                            }}
-                            className="py-1 px-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition"
-                            title="Focar local no mapa"
-                          >
-                            <MapPin className="w-3 h-3 text-rose-400" />
-                            <span>Mapa</span>
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })
+                  filteredPedidos.map((p) => (
+                    <CompactOrderBar
+                      key={p.id}
+                      pedido={p}
+                      onUpdateStatus={handleUpdateStatus}
+                      onOpenChat={(entregador, displayId) => {
+                        alert(`💬 Chat do Pedido #${displayId}`);
+                      }}
+                      onColetar={(id) => handleUpdateStatus(id, 'em_rota')}
+                      onEditPedido={(pedido) => setEditingPedido(pedido)}
+                      onAlocar={(pedido) => setAlocarModalPedido(pedido)}
+                      onOpenDetails={(pedido) => setDetalhesModalPedido(pedido)}
+                      onDeletePedido={(id) => handleDeletePedido(id)}
+                      onSelectPedido={(pedido) => {
+                        setSelectedPedido(pedido);
+                        setShowSingleRoute(true);
+                      }}
+                    />
+                  ))
                 )}
               </div>
 
@@ -1310,6 +1171,17 @@ export const MapTab: React.FC = () => {
         onClose={() => setIsNewOrderModalOpen(false)}
         onCreated={() => {
           fetchPedidos();
+        }}
+      />
+
+      <EditPedidoModal
+        pedido={editingPedido}
+        isOpen={Boolean(editingPedido)}
+        onClose={() => setEditingPedido(null)}
+        onSaveSuccess={(updated) => {
+          setPedidos((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+          if (selectedPedido?.id === updated.id) setSelectedPedido(updated);
+          alert(`✅ Pedido #${updated.id_externo} editado e salvo com sucesso!`);
         }}
       />
     </div>

@@ -7,7 +7,7 @@ import { Pedido, OrdemStatus } from '@/lib/supabase';
 import { checkIsPeakHour } from '@/lib/DispatchEngine';
 import { getBackendUrl } from '@/lib/backend';
 import { DriverData } from './CadastroMotoboyModal';
-import { Navigation, Bike, Car, Footprints, ListOrdered, ChevronDown, ChevronUp, Zap, Sparkles, CheckCircle2, ShieldCheck, Eye, EyeOff, MapPin, RotateCcw, MessageCircle, Copy, ExternalLink, X } from 'lucide-react';
+import { Navigation, Bike, Car, Footprints, ListOrdered, ChevronDown, ChevronUp, Zap, Sparkles, CheckCircle2, ShieldCheck, Eye, EyeOff, MapPin, RotateCcw, MessageCircle, Copy, ExternalLink, X, Edit } from 'lucide-react';
 import { OriginBadge } from './OriginBadge';
 
 export interface OsrmStep {
@@ -58,6 +58,7 @@ interface InteractiveMapProps {
   onUpdateStatus?: (pedidoId: string, newStatus: OrdemStatus) => void;
   onOpenAlocar?: (pedido: Pedido) => void;
   onOpenDetails?: (pedido: Pedido) => void;
+  onEditPedido?: (pedido: Pedido) => void;
 }
 
 // Calculadora Haversine em km
@@ -152,6 +153,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   onUpdateStatus,
   onOpenAlocar,
   onOpenDetails,
+  onEditPedido,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -1162,12 +1164,23 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             <>
               <button
                 onClick={() => {
+                  if (onEditPedido && contextMenu.pedido) onEditPedido(contextMenu.pedido);
+                  setContextMenu(null);
+                }}
+                className="w-full text-left px-3 py-2 rounded-xl hover:bg-slate-800 text-purple-300 font-extrabold flex items-center gap-2 transition border-b border-slate-800/80"
+              >
+                <Edit className="w-4 h-4 text-purple-400 shrink-0" />
+                <span>✏️ Editar Pedido</span>
+              </button>
+
+              <button
+                onClick={() => {
                   if (onOpenAlocar && contextMenu.pedido) onOpenAlocar(contextMenu.pedido);
                   setContextMenu(null);
                 }}
-                className="w-full text-left px-3 py-2 rounded-xl hover:bg-slate-800 text-purple-300 font-bold flex items-center gap-2 transition"
+                className="w-full text-left px-3 py-2 rounded-xl hover:bg-slate-800 text-sky-300 font-bold flex items-center gap-2 transition"
               >
-                <Bike className="w-4 h-4 text-purple-400 shrink-0" />
+                <Bike className="w-4 h-4 text-sky-400 shrink-0" />
                 <span>🛵 Alocar Entregador</span>
               </button>
 
@@ -1213,7 +1226,11 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
         </div>
       )}
 
-      <div ref={mapContainerRef} className="w-full h-full bg-slate-950" />
+      <div 
+        ref={mapContainerRef} 
+        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        className="w-full h-full bg-slate-950" 
+      />
     </div>
   );
 };

@@ -136,6 +136,26 @@ export const DriverTab: React.FC = () => {
     setIsSubmittingReset(false);
   };
 
+  // Deletar 100% dos Entregadores da Frota para Cadastro Limpo do Zero
+  const handleResetEntregadores = async () => {
+    if (!confirm('⚠️ Tem certeza que deseja APAGAR TODOS os entregadores para cadastrar do zero?')) {
+      return;
+    }
+    const backendUrl = getBackendUrl();
+    try {
+      const res = await fetch(`${backendUrl}/api/entregadores/reset`, { method: 'DELETE' });
+      if (res.ok) {
+        alert('✅ Todos os entregadores foram apagados! Cadastro zerado com sucesso.');
+        setDrivers([]);
+        fetchDrivers();
+      } else {
+        alert('Erro ao resetar entregadores.');
+      }
+    } catch (err) {
+      alert('Falha ao comunicar com o backend: ' + err);
+    }
+  };
+
   // Filtro de Entregadores
   const filteredDrivers = drivers.filter((d) => {
     const matchesSearch = 
@@ -245,6 +265,16 @@ export const DriverTab: React.FC = () => {
               title="Atualizar Lista"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+
+            {/* Botão Resetar Apenas Entregadores (Cadastrar do Zero) */}
+            <button
+              onClick={handleResetEntregadores}
+              className="px-3.5 py-2.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 font-extrabold text-xs border border-rose-500/40 transition flex items-center gap-1.5 shadow"
+              title="Apagar todos os entregadores cadastrados"
+            >
+              <Trash2 className="w-4 h-4 text-rose-400" />
+              <span>🗑️ Resete Todos Entregadores</span>
             </button>
 
             {/* Botão Limpeza Total Banco para Testes Reais */}
