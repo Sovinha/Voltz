@@ -67,13 +67,7 @@ export interface Pedido {
 // Força utilização exclusiva do Banco de Dados Local SQLite (sem Supabase)
 export const isSupabaseConfigured = false;
 
-const supabaseUrl = rawSupabaseUrl || 'https://placeholder.supabase.co';
-const supabaseAnonKey = rawSupabaseKey || 'placeholder-anon-key';
-
-if (!isSupabaseConfigured) {
-  console.info(
-    '[INFO] Supabase nao configurado em .env.local. O frontend usara a API REST Flask local (http://localhost:5000).'
-  );
-}
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
