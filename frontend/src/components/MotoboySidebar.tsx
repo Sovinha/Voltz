@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Users, Bike, Clock, CheckCircle2, ChevronRight, UserPlus, MessageSquare, Play } from 'lucide-react';
 import { Entregador } from '@/lib/supabase';
+import { getBackendUrl } from '@/lib/backend';
 
 interface MotoboySidebarProps {
   onOpenChat: (entregador: Entregador) => void;
@@ -10,53 +11,84 @@ interface MotoboySidebarProps {
 }
 
 export const MotoboySidebar: React.FC<MotoboySidebarProps> = ({ onOpenChat }) => {
-  const [entregadores, setEntregadores] = useState<Entregador[]>([
-    { id: '1', nome: 'ANDERSON', status: 'na_fila', corridasConcluidas: 1 },
-    { id: '2', nome: 'MARCO', status: 'na_fila', corridasConcluidas: 0 },
-    { id: '3', nome: 'ROBERTO', status: 'em_rota', corridasConcluidas: 3 },
-    { id: '4', nome: 'CARLOS', status: 'offline', corridasConcluidas: 0 },
-  ]);
-
+  const [entregadores, setEntregadores] = useState<Entregador[]>([]);
   const [showOffline, setShowOffline] = useState(false);
   const [novoNome, setNovoNome] = useState('');
   const [showAddInput, setShowAddInput] = useState(false);
+
+  const fetchDrivers = async () => {
+    try {
+      const backendUrl = getBackendUrl();
+      const res = await fetch(`${backendUrl}/api/entregadores`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setEntregadores(data.map((d: any) => ({
+            id: d.id,
+            nome: d.nome,
+            status: d.status === 'disponivel' ? 'na_fila' : d.status === 'em_rota' ? 'em_rota' : 'offline',
+            corridasConcluidas: d.total_entregas || 0,
+          })));
+        }
+      }
+    } catch (e) {
+      console.warn('Falha ao buscar entregadores:', e);
+    }
+  };
+
+  useEffect(() => {
+    fetchDrivers();
+    const interval = setInterval(fetchDrivers, 3000);
+    return () => clearInterval(interval);
+  }, []);
 
   const naFila = entregadores.filter((e) => e.status === 'na_fila');
   const emRota = entregadores.filter((e) => e.status === 'em_rota');
   const offline = entregadores.filter((e) => e.status === 'offline');
   const onlineCount = naFila.length + emRota.length;
 
-  const handleAddMotoboy = (e: React.FormEvent) => {
+  const handleAddMotoboy = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!novoNome.trim()) return;
 
-    const newMotoboy: Entregador = {
-      id: Date.now().toString(),
-      nome: novoNome.trim().toUpperCase(),
-      status: 'na_fila',
-      corridasConcluidas: 0,
-    };
+    try {
+      const backendUrl = getBackendUrl();
+      const res = await fetch(`${backendUrl}/api/entregadores`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nome: novoNome.trim().toUpperCase(),
+          telefone: `839${Math.floor(10000000 + Math.random() * 90000008)}`,
+          status: 'disponivel',
+        })
+      });
+      if (res.ok) {
+        fetchDrivers();
+      }
+    } catch (err) {
+      console.warn('Erro ao cadastrar motoboy:', err);
+    }
 
-    setEntregadores([...entregadores, newMotoboy]);
     setNovoNome('');
     setShowAddInput(false);
   };
 
-  const toggleStatus = (id: string) => {
-    setEntregadores((prev) =>
-      prev.map((e) => {
-        if (e.id === id) {
-          const nextStatus =
-            e.status === 'na_fila'
-              ? 'em_rota'
-              : e.status === 'em_rota'
-              ? 'offline'
-              : 'na_fila';
-          return { ...e, status: nextStatus };
-        }
-        return e;
-      })
-    );
+  const toggleStatus = async (id: string) => {
+    const target = entregadores.find(e => e.id === id);
+    if (!target) return;
+    const nextBackendStatus = target.status === 'na_fila' ? 'em_rota' : target.status === 'em_rota' ? 'offline' : 'disponivel';
+
+    try {
+      const backendUrl = getBackendUrl();
+      await fetch(`${backendUrl}/api/entregadores/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: nextBackendStatus })
+      });
+      fetchDrivers();
+    } catch (err) {
+      console.warn('Erro ao alterar status:', err);
+    }
   };
 
   return (
@@ -160,25 +192,23 @@ export const MotoboySidebar: React.FC<MotoboySidebarProps> = ({ onOpenChat }) =>
             emRota.map((motoboy) => (
               <div
                 key={motoboy.id}
-                className="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-sky-500/30 text-xs"
+                className="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800 text-xs"
               >
                 <span className="font-semibold text-sky-300 flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse"></span>
+                  <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping" />
                   {motoboy.nome}
                 </span>
 
                 <div className="flex items-center gap-1">
                   <button
                     onClick={() => onOpenChat(motoboy)}
-                    className="p-1 rounded text-sky-400 hover:bg-sky-500/20"
-                    title="Abrir Chat"
+                    className="p-1 rounded text-sky-400 hover:bg-sky-500/20 transition-colors"
                   >
                     <MessageSquare className="w-3.5 h-3.5" />
                   </button>
                   <button
                     onClick={() => toggleStatus(motoboy.id)}
-                    className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-300 font-mono hover:bg-emerald-500/30"
-                    title="Retornou à Loja (Voltar para a Fila)"
+                    className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-mono"
                   >
                     Voltou
                   </button>
@@ -189,35 +219,28 @@ export const MotoboySidebar: React.FC<MotoboySidebarProps> = ({ onOpenChat }) =>
         </div>
       </div>
 
-      {/* BLOCO 3: Sem Corrida / Offline */}
-      <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3">
-        <div className="flex items-center justify-between text-xs font-semibold text-slate-200">
-          <span>Sem corrida / Pausa: <strong className="text-slate-400 font-mono">{offline.length}</strong></span>
-        </div>
-      </div>
-
-      {/* Botão Ver Entregadores Offline */}
+      {/* BLOCO 3: Botão Ver Offline */}
       <button
         onClick={() => setShowOffline(!showOffline)}
-        className="w-full py-2 px-3 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-slate-400 hover:text-slate-200 text-xs font-medium border border-slate-700/60 transition-colors"
+        className="w-full py-2 px-3 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-400 text-xs font-medium border border-slate-800 transition flex items-center justify-between"
       >
-        {showOffline ? 'Ocultar Entregadores offline' : 'Ver Entregadores offline'}
+        <span>Ver Entregadores offline ({offline.length})</span>
+        <ChevronRight className={`w-4 h-4 transition-transform ${showOffline ? 'rotate-90' : ''}`} />
       </button>
 
-      {/* Lista de Offline */}
       {showOffline && (
-        <div className="space-y-1.5 p-2 bg-slate-950/80 rounded-xl border border-slate-800 text-xs">
+        <div className="p-2 bg-slate-950/80 rounded-xl border border-slate-800 space-y-1 text-xs text-slate-400">
           {offline.length === 0 ? (
-            <p className="text-[11px] text-slate-500 text-center py-1">Nenhum motoboy offline</p>
+            <p className="italic text-[11px] p-1">Nenhum motoboy offline</p>
           ) : (
-            offline.map((motoboy) => (
-              <div key={motoboy.id} className="flex items-center justify-between p-1.5 text-slate-400">
-                <span>{motoboy.nome} (Offline)</span>
+            offline.map((m) => (
+              <div key={m.id} className="flex justify-between items-center p-1">
+                <span>{m.nome}</span>
                 <button
-                  onClick={() => toggleStatus(motoboy.id)}
-                  className="text-[10px] px-2 py-0.5 rounded bg-sky-600/20 text-sky-400 hover:bg-sky-600/30 font-bold"
+                  onClick={() => toggleStatus(m.id)}
+                  className="text-[10px] text-sky-400 underline"
                 >
-                  Entrar na Fila
+                  Ativar
                 </button>
               </div>
             ))

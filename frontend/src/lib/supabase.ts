@@ -64,11 +64,8 @@ export interface Pedido {
   motoboy_longitude?: number | null;
 }
 
-// Leitura das variáveis de ambiente com suporte a fallback para modo local
-const rawSupabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const rawSupabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-export const isSupabaseConfigured = Boolean(rawSupabaseUrl && rawSupabaseKey);
+// Força utilização exclusiva do Banco de Dados Local SQLite (sem Supabase)
+export const isSupabaseConfigured = false;
 
 const supabaseUrl = rawSupabaseUrl || 'https://placeholder.supabase.co';
 const supabaseAnonKey = rawSupabaseKey || 'placeholder-anon-key';
