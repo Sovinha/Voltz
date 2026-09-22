@@ -7,7 +7,7 @@ import { Pedido, OrdemStatus } from '@/lib/supabase';
 import { checkIsPeakHour } from '@/lib/DispatchEngine';
 import { getBackendUrl } from '@/lib/backend';
 import { DriverData } from './CadastroMotoboyModal';
-import { Navigation, Bike, Car, Footprints, ListOrdered, ChevronDown, ChevronUp, Zap, Sparkles, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { Navigation, Bike, Car, Footprints, ListOrdered, ChevronDown, ChevronUp, Zap, Sparkles, CheckCircle2, ShieldCheck, Eye, EyeOff } from 'lucide-react';
 
 export interface OsrmStep {
   name: string;
