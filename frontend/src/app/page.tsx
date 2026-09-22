@@ -101,7 +101,7 @@ export default function Home() {
           <div className="hidden 2xl:flex items-center gap-3 text-xs text-slate-400">
             <div className="flex items-center gap-1.5 bg-slate-800/60 px-3 py-1.5 rounded-xl border border-slate-700/60">
               <Database className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Modo: <strong>Dual (Supabase/SQLite)</strong></span>
+              <span>Banco: <strong>SQLite (Alta Concorrência)</strong></span>
             </div>
             <div className="flex items-center gap-1.5 bg-slate-800/60 px-3 py-1.5 rounded-xl border border-slate-700/60">
               <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
@@ -111,8 +111,8 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Conteúdo Principal (Alternado por Abas) */}
-      <main className="max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 pt-6">
+      {/* Conteúdo Principal (Aproveitamento Máximo da Tela) */}
+      <main className="w-full px-2 sm:px-3 pt-2 pb-2">
         {activeTab === 'kanban' && <KanbanBoard />}
         {activeTab === 'map' && <MapTab />}
         {activeTab === 'driver' && <DriverTab />}

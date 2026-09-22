@@ -597,34 +597,34 @@ export const MapTab: React.FC = () => {
   const driversDisponiveis = drivers.filter(d => d.status === 'disponivel');
 
   return (
-    <div className="h-[calc(100vh-6.2rem)] min-h-[660px] flex flex-col space-y-3 overflow-hidden text-slate-100 font-sans">
+    <div className="h-[calc(100vh-4.6rem)] min-h-[660px] flex flex-col space-y-2 overflow-hidden text-slate-100 font-sans">
       
       {/* 1. BARRA SUPERIOR DE COMANDO HUD (Top Command HUD) */}
-      <div className="bg-slate-900/95 border border-slate-800/80 rounded-2xl p-2.5 shadow-2xl backdrop-blur-md flex items-center justify-between gap-3 shrink-0">
+      <div className="bg-slate-900/95 border border-slate-800/80 rounded-2xl p-2 shadow-2xl backdrop-blur-md flex items-center justify-between gap-2 shrink-0">
         
         {/* Identidade da Loja Matriz */}
-        <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded-xl bg-gradient-to-br from-amber-500 to-amber-600 text-slate-950 font-black shadow-lg shadow-amber-500/20">
-            <Store className="w-4 h-4" />
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 rounded-xl bg-gradient-to-br from-amber-500 to-amber-600 text-slate-950 font-black shadow-md">
+            <Store className="w-3.5 h-3.5" />
           </div>
-          <div>
-            <h2 className="text-xs font-bold text-white flex items-center gap-1.5 leading-tight">
+          <div className="hidden sm:block">
+            <h2 className="text-xs font-bold text-white flex items-center gap-1 leading-tight">
               <span>{loja.nome}</span>
               <button
                 onClick={() => setIsStoreModalOpen(true)}
-                className="text-[10px] text-amber-400 hover:underline font-mono"
+                className="text-[9px] text-amber-400 hover:underline font-mono"
               >
                 (Editar)
               </button>
             </h2>
-            <p className="text-[10px] text-slate-400 font-mono truncate max-w-[200px] xl:max-w-[300px]">
+            <p className="text-[9px] text-slate-400 font-mono truncate max-w-[150px] xl:max-w-[250px]">
               {loja.endereco}
             </p>
           </div>
         </div>
 
         {/* Central de Filtros & Busca Unificada */}
-        <div className="flex-1 max-w-2xl flex items-center gap-2">
+        <div className="flex-1 max-w-3xl flex items-center gap-2">
           {/* Input de Busca */}
           <div className="relative flex-1">
             <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
@@ -633,17 +633,17 @@ export const MapTab: React.FC = () => {
               placeholder="Buscar cliente, código ou rua..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 text-xs focus:border-amber-500 focus:outline-none placeholder:text-slate-500 font-medium"
+              className="w-full pl-9 pr-3 py-1 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 text-xs focus:border-amber-500 focus:outline-none placeholder:text-slate-500 font-medium"
             />
           </div>
 
           {/* Switcher de Origem (Todos / Web / iFood) */}
-          <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs shrink-0">
+          <div className="flex items-center bg-slate-950 p-0.5 rounded-xl border border-slate-800 text-xs shrink-0">
             {(['todos', 'web', 'ifood'] as const).map((o) => (
               <button
                 key={o}
                 onClick={() => setOrigemFilter(o)}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all ${
                   origemFilter === o
                     ? 'bg-amber-500 text-slate-950 shadow-md'
                     : 'text-slate-400 hover:text-slate-200'
@@ -655,12 +655,12 @@ export const MapTab: React.FC = () => {
           </div>
 
           {/* Status Chips Bar */}
-          <div className="hidden xl:flex items-center gap-1 overflow-x-auto">
+          <div className="hidden lg:flex items-center gap-1 overflow-x-auto">
             {statusFilterPills.map((f) => (
               <button
                 key={f.key}
                 onClick={() => setStatusFilter(f.key)}
-                className={`px-2 py-1 rounded-lg text-[11px] font-bold border transition-all whitespace-nowrap ${
+                className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition-all whitespace-nowrap ${
                   statusFilter === f.key
                     ? 'bg-purple-600 text-white border-purple-400 shadow'
                     : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200'
@@ -673,17 +673,17 @@ export const MapTab: React.FC = () => {
         </div>
 
         {/* Chaves de Operação Logística Avançada */}
-        <div className="flex items-center gap-2 shrink-0">
-          <div className={`px-2.5 py-1 rounded-xl border text-xs font-bold flex items-center gap-1.5 ${
+        <div className="flex items-center gap-1.5 shrink-0">
+          <div className={`px-2 py-1 rounded-xl border text-[10px] font-bold flex items-center gap-1 ${
             peakInfo.isPeak ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-slate-950 text-slate-400 border-slate-800'
           }`}>
-            <Flame className={`w-3.5 h-3.5 ${peakInfo.isPeak ? 'text-amber-400 animate-pulse' : 'text-slate-500'}`} />
-            <span className="hidden sm:inline">{peakInfo.label}</span>
+            <Flame className={`w-3 h-3 ${peakInfo.isPeak ? 'text-amber-400 animate-pulse' : 'text-slate-500'}`} />
+            <span className="hidden md:inline">{peakInfo.label}</span>
           </div>
 
           <button
             onClick={() => setIsWebhookModalOpen(true)}
-            className="px-2.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs transition-all flex items-center gap-1 shadow hover:scale-102"
+            className="px-2 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-[11px] transition-all flex items-center gap-1 shadow hover:scale-102"
           >
             <Zap className="w-3.5 h-3.5 fill-slate-950" />
             <span className="hidden md:inline">⚡ Webhook</span>
@@ -691,16 +691,16 @@ export const MapTab: React.FC = () => {
 
           <button
             onClick={handleResetDatabase}
-            className="px-2.5 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 font-bold text-xs transition-all flex items-center gap-1 shadow"
+            className="px-2 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 font-bold text-[11px] transition-all flex items-center gap-1 shadow"
             title="Apagar todos os pedidos e zerar o mapa"
           >
             <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-            <span className="hidden md:inline">Zerar Pedidos</span>
+            <span className="hidden md:inline">Zerar</span>
           </button>
 
           <button
             onClick={() => setIsAutoPilotEnabled(!isAutoPilotEnabled)}
-            className={`px-2.5 py-1.5 rounded-xl border text-xs font-extrabold transition-all flex items-center gap-1.5 shadow ${
+            className={`px-2 py-1.5 rounded-xl border text-[11px] font-extrabold transition-all flex items-center gap-1 shadow ${
               isAutoPilotEnabled
                 ? 'bg-emerald-500 text-slate-950 border-emerald-400'
                 : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
@@ -745,10 +745,10 @@ export const MapTab: React.FC = () => {
       )}
 
       {/* 2. ÁREA DE TRABALHO ASSIMÉTRICA: CANVAS DO MAPA + CONSOLE LATERAL */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 h-full overflow-hidden">
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-2 h-full overflow-hidden">
         
-        {/* ==================== CANVAS DO MAPA CENTRAL (7 COLUNAS EM TELAS LARGAS) ==================== */}
-        <div className="lg:col-span-7 xl:col-span-8 h-full relative border border-slate-800/80 rounded-2xl overflow-hidden shadow-2xl bg-slate-950 flex flex-col">
+        {/* ==================== CANVAS DO MAPA CENTRAL (8/9 COLUNAS EM TELAS LARGAS) ==================== */}
+        <div className="lg:col-span-8 xl:col-span-9 h-full relative border border-slate-800/80 rounded-2xl overflow-hidden shadow-2xl bg-slate-950 flex flex-col">
           {/* Componente Mapa Leaflet com Toolbar Unificada sem Overlaps */}
           <div className="flex-1 w-full h-full relative">
             <InteractiveMap
@@ -781,8 +781,8 @@ export const MapTab: React.FC = () => {
           </div>
         </div>
 
-        {/* ==================== CONSOLE LATERAL DE OPERAÇÕES (5 COLUNAS EM TELAS LARGAS) ==================== */}
-        <div className="lg:col-span-5 xl:col-span-4 h-full flex flex-col bg-slate-900/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-3 shadow-2xl overflow-hidden gap-3">
+        {/* ==================== CONSOLE LATERAL DE OPERAÇÕES COMPACTO (3/4 COLUNAS) ==================== */}
+        <div className="lg:col-span-4 xl:col-span-3 h-full flex flex-col bg-slate-900/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-2.5 shadow-2xl overflow-hidden gap-2">
           
           {/* Abas Alternadoras do Console Lateral */}
           <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 shrink-0">
