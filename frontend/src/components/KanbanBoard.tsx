@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { supabase, isSupabaseConfigured, Pedido, OrdemStatus, Entregador } from '@/lib/supabase';
 import { getBackendUrl } from '@/lib/backend';
+import { analyzeOrderItems } from '@/lib/beverageDetection';
 import { OrderCard } from './OrderCard';
 import { CompactOrderBar } from './CompactOrderBar';
 import { MotoboySidebar } from './MotoboySidebar';
@@ -26,7 +27,10 @@ import {
   Trash2,
   History,
   Sparkles,
-  Calendar
+  Calendar,
+  Zap,
+  DollarSign,
+  Coffee
 } from 'lucide-react';
 
 export const KanbanBoard: React.FC = () => {
@@ -36,6 +40,8 @@ export const KanbanBoard: React.FC = () => {
   const [origemFilter, setOrigemFilter] = useState<'all' | 'web' | 'ifood'>('all');
   const [timeFilter, setTimeFilter] = useState<'24h' | 'all'>('24h');
   const [onlyDelayedFilter, setOnlyDelayedFilter] = useState(false);
+  const [onlyBeveragesFilter, setOnlyBeveragesFilter] = useState(false);
+  const [isAiDispatching, setIsAiDispatching] = useState(false);
   const [slaThresholdMin, setSlaThresholdMin] = useState(15);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [realtimeConnected, setRealtimeConnected] = useState(false);
@@ -266,6 +272,31 @@ export const KanbanBoard: React.FC = () => {
     await handleUpdateStatus(id, 'despachado');
   };
 
+  // Disparo de Roteirização pelo DeepSeek AI no Kanban
+  const handleTriggerKanbanAiDispatch = async () => {
+    setIsAiDispatching(true);
+    try {
+      const backendUrl = getBackendUrl();
+      const res = await fetch(`${backendUrl}/api/ai/roteirizar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'success') {
+        const aiReason = data.decisao_ia?.raciocinio_ia || 'Rota otimizada com sucesso pelo DeepSeek AI!';
+        alert(`🤖 Roteirização Inteligente DeepSeek AI Concluída:\n\n${aiReason}`);
+        fetchPedidos();
+      } else {
+        alert(data.message || 'Erro ao comunicar com a IA do DeepSeek.');
+      }
+    } catch (e) {
+      alert('Falha ao conectar com o serviço de IA do backend.');
+    } finally {
+      setIsAiDispatching(false);
+    }
+  };
+
   // Função para verificar se o pedido está atrasado
   const isOrderDelayed = useCallback((pedido: Pedido) => {
     if (pedido.status !== 'pendente' && pedido.status !== 'preparando') return false;
@@ -280,8 +311,10 @@ export const KanbanBoard: React.FC = () => {
   }, [slaThresholdMin]);
 
   const delayedOrdersCount = pedidos.filter(isOrderDelayed).length;
+  const beveragesCount = pedidos.filter((p) => analyzeOrderItems(p.itens).hasSpecialItems).length;
+  const totalRevenue = pedidos.reduce((acc, curr) => acc + (curr.valor_total || 0), 0);
 
-  // Filtragem dos pedidos (Pesquisa, Origem, SLA Atrasados e Período 24h)
+  // Filtragem dos pedidos (Pesquisa, Origem, SLA Atrasados, Bebidas e Período 24h)
   const cutoff24hMs = Date.now() - 24 * 60 * 60 * 1000;
   const filteredPedidos = pedidos.filter((p) => {
     const matchesQuery =
@@ -291,6 +324,7 @@ export const KanbanBoard: React.FC = () => {
 
     const matchesOrigem = origemFilter === 'all' || p.origem === origemFilter;
     const matchesDelayed = !onlyDelayedFilter || isOrderDelayed(p);
+    const matchesBeverages = !onlyBeveragesFilter || analyzeOrderItems(p.itens).hasSpecialItems;
 
     let matchesTime = true;
     if (timeFilter === '24h' && p.created_at) {
@@ -301,7 +335,7 @@ export const KanbanBoard: React.FC = () => {
       }
     }
 
-    return matchesQuery && matchesOrigem && matchesDelayed && matchesTime;
+    return matchesQuery && matchesOrigem && matchesDelayed && matchesBeverages && matchesTime;
   });
 
   const colPendente = filteredPedidos.filter((p) => p.status === 'pendente');
@@ -316,6 +350,63 @@ export const KanbanBoard: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* CARDS KPI DE NAVEGAÇÃO & RESUMO DO KANBAN */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {/* KPI 1: Total Pedidos */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 flex items-center gap-3 shadow-lg">
+          <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0">
+            <Layers className="w-5 h-5" />
+          </div>
+          <div>
+            <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 block">Total Ativos</span>
+            <div className="text-lg font-black text-white">{filteredPedidos.length} Pedidos</div>
+          </div>
+        </div>
+
+        {/* KPI 2: Faturamento em Produção */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 flex items-center gap-3 shadow-lg">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0">
+            <DollarSign className="w-5 h-5" />
+          </div>
+          <div>
+            <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 block">Faturamento em Produção</span>
+            <div className="text-lg font-black text-emerald-300">R$ {totalRevenue.toFixed(2)}</div>
+          </div>
+        </div>
+
+        {/* KPI 3: Pedidos com Bebida */}
+        <div 
+          onClick={() => setOnlyBeveragesFilter(!onlyBeveragesFilter)}
+          className={`bg-slate-900 border rounded-2xl p-3.5 flex items-center gap-3 shadow-lg cursor-pointer transition-all ${
+            onlyBeveragesFilter ? 'border-amber-500 bg-amber-950/20' : 'border-slate-800 hover:border-slate-700'
+          }`}
+        >
+          <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-300 flex items-center justify-center text-lg shrink-0">
+            🥤
+          </div>
+          <div>
+            <span className="text-[10px] font-mono uppercase tracking-wider text-amber-400 font-bold block">Com Bebida / Sobremesa</span>
+            <div className="text-lg font-black text-amber-200">{beveragesCount} Pedido(s)</div>
+          </div>
+        </div>
+
+        {/* KPI 4: Críticos SLA */}
+        <div 
+          onClick={() => setOnlyDelayedFilter(!onlyDelayedFilter)}
+          className={`bg-slate-900 border rounded-2xl p-3.5 flex items-center gap-3 shadow-lg cursor-pointer transition-all ${
+            delayedOrdersCount > 0 ? 'border-rose-500/80 bg-rose-950/20 animate-pulse' : 'border-slate-800'
+          }`}
+        >
+          <div className="w-10 h-10 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-400 flex items-center justify-center shrink-0">
+            <AlertTriangle className="w-5 h-5" />
+          </div>
+          <div>
+            <span className="text-[10px] font-mono uppercase tracking-wider text-rose-400 font-bold block">Críticos (&gt; {slaThresholdMin} min)</span>
+            <div className="text-lg font-black text-rose-300">{delayedOrdersCount} Pedido(s)</div>
+          </div>
+        </div>
+      </div>
+
       {/* Banner de Alerta Crítico */}
       {delayedOrdersCount > 0 && (
         <div className="bg-rose-500/15 border-2 border-rose-500/80 rounded-2xl p-4 flex items-center justify-between gap-4 animate-pulse shadow-xl backdrop-blur">
@@ -362,6 +453,16 @@ export const KanbanBoard: React.FC = () => {
             className="w-full pl-9 pr-4 py-2 rounded-xl bg-slate-800/80 border border-slate-700/70 text-slate-100 text-sm focus:outline-none focus:border-sky-500 transition-colors"
           />
         </div>
+
+        {/* BOTÃO DISPARO DE DEEPSEEK AI NO KANBAN */}
+        <button
+          onClick={handleTriggerKanbanAiDispatch}
+          disabled={isAiDispatching}
+          className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-xs shadow-lg transition-all flex items-center gap-1.5 active:scale-95 disabled:opacity-50"
+        >
+          <Zap className={`w-4 h-4 ${isAiDispatching ? 'animate-spin' : ''}`} />
+          <span>{isAiDispatching ? 'Roteirizando...' : '🤖 DeepSeek AI Roteirizar'}</span>
+        </button>
 
         {/* Filtro de Janela de Tempo (24h vs Todas) */}
         <div className="flex items-center gap-1 bg-slate-950/80 p-1 rounded-xl border border-slate-800">
@@ -500,8 +601,8 @@ export const KanbanBoard: React.FC = () => {
           />
         </div>
 
-        {/* Quadro Kanban (Colunas de Status) */}
-        <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+        {/* Quadro Kanban (Colunas de Status: 4 Colunas) */}
+        <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 items-start">
           {/* Coluna 1: PENDENTE */}
           <div className="bg-slate-900/40 rounded-2xl border border-slate-800/80 p-4 space-y-4 min-h-[500px]">
             <div className="flex items-center justify-between pb-3 border-b border-amber-500/20">
@@ -595,7 +696,7 @@ export const KanbanBoard: React.FC = () => {
                 <div className="p-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
                   <CheckCircle2 className="w-4 h-4" />
                 </div>
-                <h3>Prontos para Expedição</h3>
+                <h3>Prontos p/ Rota</h3>
               </div>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                 {colPronto.length}
@@ -609,6 +710,49 @@ export const KanbanBoard: React.FC = () => {
                 </div>
               ) : (
                 colPronto.map((pedido) =>
+                  viewStyle === 'compact' ? (
+                    <CompactOrderBar
+                      key={pedido.id}
+                      pedido={pedido}
+                      onUpdateStatus={handleUpdateStatus}
+                      onOpenChat={(m, pid) => handleOpenChat(m, pid)}
+                      onColetar={handleColetar}
+                    />
+                  ) : (
+                    <OrderCard
+                      key={pedido.id}
+                      pedido={pedido}
+                      onUpdateStatus={handleUpdateStatus}
+                      onDeletePedido={handleDeletePedido}
+                      slaThresholdMin={slaThresholdMin}
+                    />
+                  )
+                )
+              )}
+            </div>
+          </div>
+
+          {/* Coluna 4: EM ROTA / DESPACHADO */}
+          <div className="bg-slate-900/40 rounded-2xl border border-slate-800/80 p-4 space-y-4 min-h-[500px]">
+            <div className="flex items-center justify-between pb-3 border-b border-sky-500/20">
+              <div className="flex items-center gap-2 text-sky-400 font-semibold text-sm">
+                <div className="p-1.5 rounded-lg bg-sky-500/10 border border-sky-500/20">
+                  <Truck className="w-4 h-4" />
+                </div>
+                <h3>Em Rota / Despachados</h3>
+              </div>
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                {colDespachado.length}
+              </span>
+            </div>
+
+            <div className="space-y-3">
+              {colDespachado.length === 0 ? (
+                <div className="text-center py-12 border border-dashed border-slate-800 rounded-xl">
+                  <p className="text-xs text-slate-500">Nenhum pedido em rota</p>
+                </div>
+              ) : (
+                colDespachado.map((pedido) =>
                   viewStyle === 'compact' ? (
                     <CompactOrderBar
                       key={pedido.id}

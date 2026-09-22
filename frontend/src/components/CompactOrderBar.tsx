@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { CreditCard, ShoppingBag, MessageSquare, MoreVertical, CheckCircle2, DollarSign, Globe, UserCheck, ShieldAlert } from 'lucide-react';
 import { Pedido, OrdemStatus, Entregador } from '@/lib/supabase';
+import { analyzeOrderItems } from '@/lib/beverageDetection';
 
 interface CompactOrderBarProps {
   pedido: Pedido;
@@ -19,6 +20,8 @@ export const CompactOrderBar: React.FC<CompactOrderBarProps> = ({
 }) => {
   const [elapsedMinutes, setElapsedMinutes] = useState(13);
   const [coletado, setColetado] = useState(pedido.status === 'despachado');
+
+  const itemAnalysis = analyzeOrderItems(pedido.itens);
 
   useEffect(() => {
     try {
@@ -54,7 +57,7 @@ export const CompactOrderBar: React.FC<CompactOrderBarProps> = ({
 
   return (
     <div className="w-full bg-slate-900 border border-slate-700/80 rounded-2xl px-3 py-2 flex items-center justify-between gap-3 shadow-lg hover:border-slate-600 transition-all text-slate-100">
-      {/* Esquerda: Ícone de Origem + ID Roxo + Circulo de Tempo + Nome do Cliente */}
+      {/* Esquerda: Ícone de Origem + ID Roxo + Circulo de Tempo + Nome do Cliente + Ícone Bebida */}
       <div className="flex items-center gap-2.5 min-w-0">
         {/* Ícone de Origem (iFood Vermelho Sorridente ou Cardápio Web Emerald) */}
         {isWeb ? (
@@ -77,9 +80,11 @@ export const CompactOrderBar: React.FC<CompactOrderBarProps> = ({
           {elapsedMinutes}
         </div>
 
-        {/* Nome do Cliente */}
-        <span className="font-semibold text-sm text-slate-100 truncate">
-          {pedido.nome_cliente}
+        {/* Nome do Cliente e Badges de Bebida */}
+        <span className="font-semibold text-sm text-slate-100 truncate flex items-center gap-1.5">
+          <span>{pedido.nome_cliente}</span>
+          {itemAnalysis.hasBeverage && <span title="Possui Bebida Gelada">🥤</span>}
+          {itemAnalysis.hasDessert && <span title="Possui Sobremesa">🍰</span>}
         </span>
       </div>
 
