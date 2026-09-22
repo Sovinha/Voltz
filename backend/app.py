@@ -789,34 +789,34 @@ def remove_accents(text):
 
 def _extract_address_parts(address_str):
     """
-    Extrai CEP, bairro e endereço limpo de uma string de endereço.
-    Preserva o bairro e o CEP que antes eram perdidos na limpeza.
+    Extrai CEP, Bairro, Rua e Número de endereços do iFood / Web de múltiplas linhas ou texto bruto.
     """
-    raw = address_str.strip()
+    if not address_str or not isinstance(address_str, str):
+        return "", None, None
 
-    # 1. Extrair CEP antes de remover parênteses
+    raw = address_str.strip()
+    lines = [l.strip() for l in raw.split('\n') if l.strip()]
+    full_text = " ".join(lines)
+
+    # 1. Extrair CEP antes de remover parênteses (padrão 58046-115 ou 58046115)
     cep = None
-    cep_match = re.search(r'(\d{5})-?(\d{3})', raw)
+    cep_match = re.search(r'(\d{5})[-.\s]?(\d{3})', full_text)
     if cep_match:
         cep = f"{cep_match.group(1)}-{cep_match.group(2)}"
 
-    # 2. Extrair bairro ANTES da limpeza - procura padrão " - Bairro" ou ", Bairro,"
+    # 2. Extrair bairro ANTES da limpeza
     bairro = None
-    # Padrão: " - NomeBairro" (comum em endereços do iFood)
-    bairro_match = re.search(r'\s*-\s*([A-ZÀ-Ú][a-zà-ú]+(?:\s+(?:d[aoe]s?|D[aoe]s?)\s+[A-ZÀ-Ú][a-zà-ú]+|(?:\s+[A-ZÀ-Ú][a-zà-ú]+))*)\s*(?:,|$|-)', raw)
+    bairro_match = re.search(r'\s*-\s*([A-ZÀ-Ú][a-zà-ú]+(?:\s+(?:d[aoe]s?|D[aoe]s?)\s+[A-ZÀ-Ú][a-zà-ú]+|(?:\s+[A-ZÀ-Ú][a-zà-ú]+))*)\s*(?:,|$|-)', full_text)
     if bairro_match:
         candidate_bairro = bairro_match.group(1).strip()
-        # Não considerar se for a cidade ou estado
         skip_terms = ['joão pessoa', 'joao pessoa', 'paraíba', 'paraiba', 'pb', 'brasil']
         if candidate_bairro.lower() not in skip_terms and len(candidate_bairro) > 2:
             bairro = candidate_bairro
 
     # 3. Remover conteúdo entre parênteses (CEP, observações)
-    clean = re.sub(r'\([^\)]*\)', ' ', raw)
+    clean = re.sub(r'\([^\)]*\)', ' ', full_text)
 
-    # 4. Remover APENAS os complementos (não tudo depois deles)
-    # Antes: "Apt 1002 - Tambaú" → removia tudo = perdia Tambaú
-    # Agora: "Apt 1002" → remove só o complemento e seu valor
+    # 4. Remover complementos da string enviada ao geocodificador
     complement_patterns = [
         r',?\s*\b(ap|apt|apto|apartamento)\s*\d*\b',
         r',?\s*\b(bloco|bl)\s*[A-Za-z0-9]*\b',
@@ -829,7 +829,7 @@ def _extract_address_parts(address_str):
     for pattern in complement_patterns:
         clean = re.sub(pattern, '', clean, flags=re.IGNORECASE)
 
-    # 5. Remover observações de referência (essas SIM podem ser removidas com tudo depois)
+    # 5. Remover observações de referência da busca geográfica
     ref_patterns = [
         r'\s*-?\s*\b[Pp]r[oó]x\.?\s.*$',
         r'\b(por tr[aá]s|pr[oó]ximo|ao lado|em frente|ponto de refer[eê]ncia|refer[eê]ncia)\b.*$',
@@ -923,7 +923,7 @@ def generate_geocode_candidates(address_str):
 def geocode_address(address_str):
     """
     Converte um endereço textual em coordenadas (latitude, longitude) reais com precisão de rua e número em João Pessoa/PB.
-    Usa busca estruturada + free-form com OpenStreetMap Nominatim e faz fallback gracioso para o bairro.
+    Utiliza Inteligência ViaCEP (Correios) + Busca Estruturada OpenStreetMap Nominatim.
     """
     if not address_str or not isinstance(address_str, str):
         return -7.1155, -34.8601
@@ -933,7 +933,8 @@ def geocode_address(address_str):
     # Extrair CEP e partes do endereço
     clean, cep, bairro = _extract_address_parts(address_str)
 
-    # Tentativa 0-A: Consulta ViaCEP para obter o logradouro e bairro oficiais pelo CEP brasileiro
+    # Tentativa 0-A (INTELIGÊNCIA MAXIMA VIACEP + NOMINATIM):
+    # Consulta a base oficial dos Correios (ViaCEP) pelo CEP de 8 dígitos para obter a rua e bairro oficiais
     if cep:
         try:
             clean_cep = cep.replace("-", "").strip()
@@ -944,17 +945,23 @@ def geocode_address(address_str):
                     official_street = vdata.get("logradouro", "")
                     official_bairro = vdata.get("bairro", "")
                     official_city = vdata.get("localidade", "João Pessoa")
+                    official_uf = vdata.get("uf", "PB")
 
-                    num_match = re.search(r'(?:,\s*|\s+)(\d{1,5})(?:\s*[-,]|\s|$)', clean)
+                    # Extrair o número exato da 1ª linha do endereço original
+                    lines = [l.strip() for l in address_str.split('\n') if l.strip()]
+                    line1 = lines[0] if lines else clean
+                    num_match = re.search(r'(?:,\s*|\s+)(\d{1,5})(?:\s*[-,]|\s|$)', line1)
+                    if not num_match:
+                        num_match = re.search(r'(?:,\s*|\s+)(\d{1,5})(?:\s*[-,]|\s|$)', clean)
                     hnum = num_match.group(1) if num_match else ""
 
-                    query_q = f"{official_street} {hnum}, {official_bairro}, {official_city}, PB, Brasil".strip()
+                    query_q = f"{official_street} {hnum}, {official_bairro}, {official_city}, {official_uf}, Brasil".replace(" ,", "").strip()
                     nom_res = requests.get("https://nominatim.openstreetmap.org/search", params={"q": query_q, "format": "json", "limit": 1}, headers=headers, timeout=3)
                     if nom_res.status_code == 200:
                         njson = nom_res.json()
                         if njson and len(njson) > 0:
                             lat, lng = sanitize_coords(njson[0]["lat"], njson[0]["lon"])
-                            print(f"[GEOCODE ViaCEP+Nominatim SUCESSO] '{query_q}' -> ({lat}, {lng})", file=sys.stderr, flush=True)
+                            print(f"[GEOCODE ViaCEP+Nominatim 100% SUCESSO] '{query_q}' -> ({lat}, {lng})", file=sys.stderr, flush=True)
                             return lat, lng
         except Exception as e_vcep:
             print(f"[GEOCODE WARN] Consulta ViaCEP indisponível: {e_vcep}", file=sys.stderr, flush=True)
