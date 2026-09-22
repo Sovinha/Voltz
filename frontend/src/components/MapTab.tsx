@@ -709,53 +709,18 @@ export const MapTab: React.FC = () => {
         
         {/* ==================== CANVAS DO MAPA CENTRAL (7 COLUNAS EM TELAS LARGAS) ==================== */}
         <div className="lg:col-span-7 xl:col-span-8 h-full relative border border-slate-800/80 rounded-2xl overflow-hidden shadow-2xl bg-slate-950 flex flex-col">
-          
-          {/* Overlay Flutuante do Mapa (Top Left HUD Overlay) */}
-          <div className="absolute top-3 left-3 z-[400] flex items-center gap-2 pointer-events-auto">
-            <div className="bg-slate-900/90 backdrop-blur border border-slate-800 px-3 py-1.5 rounded-xl text-[11px] font-bold text-slate-200 shadow-xl flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-              <span>GPS Matriz Ativo</span>
-            </div>
-
-            <div className="bg-slate-900/90 backdrop-blur border border-slate-800 px-3 py-1.5 rounded-xl text-[11px] font-mono text-slate-300 shadow-xl hidden sm:flex items-center gap-1.5">
-              <Users className="w-3.5 h-3.5 text-sky-400" />
-              <span>Frota Livre: <strong className="text-emerald-400">{driversDisponiveis.length}</strong>/{drivers.length}</span>
-            </div>
-          </div>
-
-          {/* Overlay Flutuante do Mapa (Top Right Controls Overlay) */}
-          <div className="absolute top-3 right-3 z-[400] flex items-center gap-1.5 pointer-events-auto">
-            <button
-              onClick={() => setShowSingleRoute(!showSingleRoute)}
-              className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all backdrop-blur flex items-center gap-1 shadow ${
-                showSingleRoute
-                  ? 'bg-sky-500/20 text-sky-300 border-sky-500/50'
-                  : 'bg-slate-900/90 text-slate-400 border-slate-800 hover:text-slate-200'
-              }`}
-            >
-              {showSingleRoute ? <Eye className="w-3.5 h-3.5 text-sky-400" /> : <EyeOff className="w-3.5 h-3.5 text-slate-500" />}
-              <span className="hidden sm:inline">Exibir Linha</span>
-            </button>
-
-            <button
-              onClick={() => setShowEtaBadge(!showEtaBadge)}
-              className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all backdrop-blur flex items-center gap-1 shadow ${
-                showEtaBadge
-                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/50'
-                  : 'bg-slate-900/90 text-slate-400 border-slate-800 hover:text-slate-200'
-              }`}
-            >
-              <span>🛵 Tempo</span>
-            </button>
-          </div>
-
-          {/* Componente Mapa Leaflet */}
+          {/* Componente Mapa Leaflet com Toolbar Unificada sem Overlaps */}
           <div className="flex-1 w-full h-full relative">
             <InteractiveMap
               loja={loja}
               pedidos={pedidos}
               drivers={drivers}
               selectedPedido={selectedPedido}
+
+              driversDisponiveisCount={driversDisponiveis.length}
+              totalDriversCount={drivers.length}
+              onToggleSingleRoute={() => setShowSingleRoute(!showSingleRoute)}
+              onToggleEtaBadge={() => setShowEtaBadge(!showEtaBadge)}
 
               selectedStatusFilter={statusFilter}
               batchPedidos={orderedBatch}
@@ -767,10 +732,7 @@ export const MapTab: React.FC = () => {
               showEtaBadgeExternal={showEtaBadge}
               showSingleRouteExternal={showSingleRoute}
               showBatchRouteExternal={showBatchRoute}
-              onSelectPedido={(p) => {
-                setSelectedPedido(p);
-                setShowSingleRoute(true);
-              }}
+              onSelectPedido={(p) => setSelectedPedido(p)}
               onUpdateStatus={handleUpdateStatus}
               onOpenAlocar={(p) => setAlocarModalPedido(p)}
               onOpenDetails={(p) => setDetalhesModalPedido(p)}

@@ -32,6 +32,11 @@ interface InteractiveMapProps {
   drivers?: DriverData[];
   selectedPedido: Pedido | null;
 
+  driversDisponiveisCount?: number;
+  totalDriversCount?: number;
+  onToggleSingleRoute?: () => void;
+  onToggleEtaBadge?: () => void;
+
   selectedStatusFilter?: string;
   batchPedidos?: Pedido[];
   includeReturnLeg?: boolean;
@@ -126,6 +131,11 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   pedidos,
   drivers = [],
   selectedPedido,
+
+  driversDisponiveisCount,
+  totalDriversCount,
+  onToggleSingleRoute,
+  onToggleEtaBadge,
 
   selectedStatusFilter = 'todos',
   batchPedidos = [],
@@ -780,57 +790,96 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
 
   return (
     <div className="relative w-full h-[calc(100vh-140px)] min-h-[600px] rounded-2xl overflow-hidden border border-slate-800 shadow-2xl z-0">
-      {/* Barra de Ferramentas OSRM & Seletor de Modelo de Mapa */}
-      <div className="absolute top-3 left-4 right-4 z-[500] flex flex-wrap items-center justify-between gap-2 pointer-events-none">
+      {/* Barra de Ferramentas Unificada (Top Toolbar) */}
+      <div className="absolute top-3 left-3 right-3 z-[500] flex flex-wrap items-center justify-between gap-2 pointer-events-none">
         
-        {/* Esquerda: Seletor Estilo do Mapa */}
-        <div className="flex items-center gap-1 bg-slate-900/95 backdrop-blur-md p-1.5 rounded-xl border border-slate-700/60 shadow-2xl pointer-events-auto">
-          {(Object.keys(MAP_STYLES) as Array<keyof typeof MAP_STYLES>).map((styleKey) => (
-            <button
-              key={styleKey}
-              onClick={() => setMapStyle(styleKey)}
-              className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all ${
-                mapStyle === styleKey
-                  ? 'bg-amber-500 text-slate-950 shadow-md scale-105'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              {MAP_STYLES[styleKey].name}
-            </button>
-          ))}
+        {/* Esquerda: Status da Matriz & Seletor de Estilo */}
+        <div className="flex items-center gap-1.5 pointer-events-auto flex-wrap">
+          <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700/60 px-3 py-1.5 rounded-xl text-[11px] font-bold text-slate-200 shadow-xl flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+            <span>GPS Matriz Ativo</span>
+          </div>
+
+          {driversDisponiveisCount !== undefined && totalDriversCount !== undefined && (
+            <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700/60 px-3 py-1.5 rounded-xl text-[11px] font-mono text-slate-300 shadow-xl hidden xl:flex items-center gap-1.5">
+              <span className="text-sky-400 font-bold">Frota Livre:</span>
+              <strong className="text-emerald-400">{driversDisponiveisCount}</strong>/{totalDriversCount}
+            </div>
+          )}
+
+          <div className="flex items-center gap-1 bg-slate-900/95 backdrop-blur-md p-1 rounded-xl border border-slate-700/60 shadow-xl">
+            {(Object.keys(MAP_STYLES) as Array<keyof typeof MAP_STYLES>).map((styleKey) => (
+              <button
+                key={styleKey}
+                onClick={() => setMapStyle(styleKey)}
+                className={`px-2 py-1 text-[11px] font-bold rounded-lg transition-all ${
+                  mapStyle === styleKey
+                    ? 'bg-amber-500 text-slate-950 shadow scale-105'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                }`}
+              >
+                {MAP_STYLES[styleKey].name}
+              </button>
+            ))}
+          </div>
         </div>
 
-        {/* Direita: Controles OSRM v5 (Perfis & Navegação Passo a Passo) */}
-        <div className="flex items-center gap-2 pointer-events-auto">
-          {/* Seletor de Perfil OSRM */}
-          <div className="flex items-center gap-1 bg-slate-900/95 backdrop-blur-md p-1.5 rounded-xl border border-slate-700/60 shadow-2xl">
+        {/* Direita: Controles de Linhas & Perfis OSRM */}
+        <div className="flex items-center gap-1.5 pointer-events-auto flex-wrap">
+          {onToggleSingleRoute && (
+            <button
+              onClick={onToggleSingleRoute}
+              className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all backdrop-blur flex items-center gap-1 shadow ${
+                showSingleRouteExternal
+                  ? 'bg-sky-500/20 text-sky-300 border-sky-500/50'
+                  : 'bg-slate-900/95 text-slate-400 border-slate-700/60 hover:text-slate-200'
+              }`}
+            >
+              {showSingleRouteExternal ? <Eye className="w-3.5 h-3.5 text-sky-400" /> : <EyeOff className="w-3.5 h-3.5 text-slate-500" />}
+              <span className="hidden sm:inline">Exibir Linha</span>
+            </button>
+          )}
+
+          {onToggleEtaBadge && (
+            <button
+              onClick={onToggleEtaBadge}
+              className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all backdrop-blur flex items-center gap-1 shadow ${
+                showEtaBadgeExternal
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/50'
+                  : 'bg-slate-900/95 text-slate-400 border-slate-700/60 hover:text-slate-200'
+              }`}
+            >
+              <span>🛵 Tempo</span>
+            </button>
+          )}
+
+          <div className="flex items-center gap-1 bg-slate-900/95 backdrop-blur-md p-1 rounded-xl border border-slate-700/60 shadow-xl">
             <button
               onClick={() => setOsrmProfile('driving')}
               title="Perfil Veículo / Moto"
               className={`p-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
                 osrmProfile === 'driving'
-                  ? 'bg-emerald-500 text-slate-950 shadow-md scale-105'
+                  ? 'bg-emerald-500 text-slate-950 shadow scale-105'
                   : 'text-slate-400 hover:text-white hover:bg-slate-800'
               }`}
             >
               <Car className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Moto/Carro</span>
+              <span className="hidden md:inline">Moto/Carro</span>
             </button>
             <button
               onClick={() => setOsrmProfile('bike')}
               title="Perfil Bicicleta"
               className={`p-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
                 osrmProfile === 'bike'
-                  ? 'bg-emerald-500 text-slate-950 shadow-md scale-105'
+                  ? 'bg-emerald-500 text-slate-950 shadow scale-105'
                   : 'text-slate-400 hover:text-white hover:bg-slate-800'
               }`}
             >
               <Bike className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Bike</span>
+              <span className="hidden md:inline">Bike</span>
             </button>
           </div>
 
-          {/* Botão de Instruções Curva-a-Curva (Steps) */}
           {osrmSteps.length > 0 && (
             <button
               onClick={() => setShowStepsDrawer(!showStepsDrawer)}
@@ -841,12 +890,6 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
               {showStepsDrawer ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </button>
           )}
-
-          {/* Indicador de Servidor OSRM */}
-          <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900/90 border border-slate-800 text-[10px] font-mono text-emerald-400 shadow-xl">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-            <span>OSRM v5</span>
-          </div>
         </div>
       </div>
 
