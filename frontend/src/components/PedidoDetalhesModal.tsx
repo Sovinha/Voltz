@@ -4,6 +4,7 @@ import React from 'react';
 import { X, ShoppingBag, MapPin, DollarSign, Clock, User, Phone, CheckCircle, ArrowLeft } from 'lucide-react';
 import { Pedido } from '@/lib/supabase';
 import { OriginBadge } from './OriginBadge';
+import { analyzeOrderItems, isBeverageItem, isDessertItem } from '@/lib/beverageDetection';
 
 interface PedidoDetalhesModalProps {
   pedido: Pedido | null;
@@ -23,6 +24,8 @@ export const PedidoDetalhesModal: React.FC<PedidoDetalhesModalProps> = ({
   onDeletePedido,
 }) => {
   if (!isOpen || !pedido) return null;
+
+  const itemAnalysis = analyzeOrderItems(pedido.itens);
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
@@ -61,16 +64,43 @@ export const PedidoDetalhesModal: React.FC<PedidoDetalhesModalProps> = ({
             </p>
           </div>
 
+          {/* ALERTA DE BEBIDAS / SOBREMESAS */}
+          {itemAnalysis.hasSpecialItems && (
+            <div className="p-3 bg-amber-500/20 border-2 border-amber-500/50 rounded-xl text-center space-y-1 animate-pulse">
+              <span className="font-black text-amber-300 text-xs block uppercase">
+                ⚠️ ATENÇÃO: INCLUI BEBIDA / SOBREMESA GELADA ⚠️
+              </span>
+              <p className="text-[11px] text-amber-200">
+                Conferir geladeira/freezer antes de liberar a entrega para o motoboy.
+              </p>
+            </div>
+          )}
+
           {/* Itens do Pedido */}
           <div className="space-y-2">
             <h4 className="font-bold text-slate-200 uppercase tracking-wider text-[10px]">Itens Solicitados:</h4>
             <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1.5 font-mono">
-              {pedido.itens.map((item, idx) => (
-                <div key={idx} className="flex justify-between items-center text-slate-300">
-                  <span>{item.quantidade}x {item.nome}</span>
-                  <strong className="text-slate-100">R$ {(item.preco_unitario * item.quantidade).toFixed(2)}</strong>
-                </div>
-              ))}
+              {pedido.itens.map((item, idx) => {
+                const isBev = isBeverageItem(item.nome);
+                const isDes = isDessertItem(item.nome);
+                const isSpecial = isBev || isDes;
+
+                return (
+                  <div 
+                    key={idx} 
+                    className={`flex justify-between items-center text-slate-300 p-1.5 rounded ${
+                      isSpecial ? 'bg-amber-500/20 border border-amber-500/40 text-amber-200 font-bold' : ''
+                    }`}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      {isBev && '🥤'}
+                      {isDes && '🍰'}
+                      <span>{item.quantidade}x {item.nome}</span>
+                    </span>
+                    <strong className="text-slate-100">R$ {((item.preco_unitario || 0) * item.quantidade).toFixed(2)}</strong>
+                  </div>
+                );
+              })}
               <div className="border-t border-slate-800 pt-2 mt-2 flex justify-between items-center text-sm font-bold">
                 <span className="text-slate-400">Valor Total:</span>
                 <span className="text-emerald-400">R$ {pedido.valor_total.toFixed(2)}</span>

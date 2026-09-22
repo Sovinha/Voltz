@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { MapPin, User, ChevronDown, ChevronUp, ArrowRight, ArrowLeft, Clock, AlertTriangle, Flame, Trash2 } from 'lucide-react';
 import { Pedido, OrdemStatus } from '@/lib/supabase';
 import { OriginBadge } from './OriginBadge';
+import { analyzeOrderItems } from '@/lib/beverageDetection';
 
 interface OrderCardProps {
   pedido: Pedido;
@@ -147,6 +148,26 @@ export const OrderCard: React.FC<OrderCardProps> = ({
             </div>
           )}
         </div>
+
+        {/* ALERTA VISUAL DE BEBIDAS E SOBREMESAS */}
+        {(() => {
+          const analysis = analyzeOrderItems(pedido.itens);
+          if (!analysis.hasSpecialItems) return null;
+          return (
+            <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+              {analysis.hasBeverage && (
+                <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-black uppercase flex items-center gap-1 shadow-sm animate-pulse">
+                  🥤 INCLUI BEBIDA
+                </span>
+              )}
+              {analysis.hasDessert && (
+                <span className="px-2 py-0.5 rounded-md bg-pink-500/20 text-pink-300 border border-pink-500/40 text-[10px] font-black uppercase flex items-center gap-1 shadow-sm">
+                  🍰 INCLUI SOBREMESA
+                </span>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Endereço de Entrega */}
         <div className="flex items-start gap-2 text-xs text-slate-300">

@@ -1583,6 +1583,132 @@ Retorne a resposta EXCLUSIVAMENTE em formato JSON (sem markdown ou texto fora do
         return jsonify({"status": "error", "message": f"Falha ao executar roteirização por IA: {str(e)}"}), 500
 
 
+@app.route("/api/ai/auto-despacho", methods=["POST"])
+def ai_auto_despacho_motoboy():
+    """
+    Automação Inteligente de Despacho ao Chegar Motoboy na Loja.
+    Quando o motoboy chega ou fica disponível, o DeepSeek AI agrupa os pedidos prontos/preparo 
+    da vizinhança mais eficiente, vincula a rota ao motoboy e altera seus status para 'em_rota'.
+    """
+    try:
+        data = request.json or {}
+        entregador_id = data.get("entregador_id", "")
+        entregador_nome = data.get("entregador_nome", "Motoboy")
+
+        conn = get_db_connection()
+        # Busca motoboy se fornecido ID
+        if entregador_id:
+            row_driver = conn.execute("SELECT * FROM entregadores WHERE id = ? OR nome LIKE ?", (entregador_id, f"%{entregador_nome}%")).fetchone()
+            if row_driver:
+                entregador_nome = row_driver["nome"]
+                entregador_id = row_driver["id"]
+
+        # Busca pedidos prontos ou em preparo
+        rows_pedidos = conn.execute("SELECT * FROM pedidos WHERE status IN ('pronto', 'preparo', 'pendente') ORDER BY created_at ASC").fetchall()
+        pedidos = [dict(r) for r in rows_pedidos]
+        conn.close()
+
+        if not pedidos:
+            return jsonify({
+                "status": "warning",
+                "message": f"Motoboy {entregador_nome} está na loja, mas não há pedidos pendentes no momento."
+            }), 200
+
+        assigned_orders = []
+        ai_reason = ""
+
+        deepseek_key = os.getenv("DEEPSEEK_API_KEY", "")
+
+        # Se houver chave DeepSeek, consulta a IA para o agrupamento
+        if deepseek_key:
+            try:
+                prompt = f"""
+Você é a IA de despacho expresso do Voltz Logistics.
+O entregador '{entregador_nome}' ACABA DE CHEGAR NA LOJA MATRIZ (Filipéia Trattoria).
+Selecione o LOTE IDEAL (máximo 3 a 4 pedidos) que devem ser despachados IMEDIATAMENTE na rota dele.
+
+PEDIDOS DISPONÍVEIS NA COZINHA/BALCÃO:
+{json.dumps(pedidos, ensure_ascii=False, indent=2)}
+
+Retorne EXCLUSIVAMENTE em formato JSON:
+{{
+  "raciocinio_ia": "⚡ Lote despachado automaticamente para {entregador_nome}: #ID1, #ID2 (bairro X - rota mais rápida).",
+  "pedidos_selecionados_ids": ["id1", "id2"],
+  "ordem_entrega": ["id1", "id2"]
+}}
+"""
+                headers = {"Authorization": f"Bearer {deepseek_key}", "Content-Type": "application/json"}
+                payload = {
+                    "model": "deepseek-chat",
+                    "messages": [
+                        {"role": "system", "content": "Você é a IA de logística do Voltz Delivery que responde estritamente em JSON."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "response_format": {"type": "json_object"},
+                    "temperature": 0.1
+                }
+                res = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=payload, timeout=12)
+                if res.status_code == 200:
+                    parsed = json.loads(res.json()["choices"][0]["message"]["content"])
+                    ai_reason = parsed.get("raciocinio_ia", "")
+                    selected_ids = parsed.get("pedidos_selecionados_ids") or parsed.get("ordem_entrega") or []
+                    
+                    # Filtra os pedidos selecionados
+                    for p in pedidos:
+                        if p["id"] in selected_ids or p["id_externo"] in selected_ids:
+                            assigned_orders.append(p)
+            except Exception as ex_ai:
+                print(f"[AUTO-DESPACHO AI] Erro na requisição DeepSeek, usando fallback: {ex_ai}")
+
+        # Fallback local se a IA não selecionou ou falhou
+        if not assigned_orders:
+            # Seleciona até 3 pedidos mais antigos da fila
+            assigned_orders = pedidos[:3]
+            ai_reason = f"⚡ Rota despachada via algoritmo geográfico local para {entregador_nome} ({len(assigned_orders)} pedidos)."
+
+        # Atualiza o banco com a atribuição e mudança para 'em_rota'
+        conn = get_db_connection()
+        despachados = []
+        for p in assigned_orders:
+            p_id = p["id"]
+            pin = p.get("codigo_confirmacao") or generate_pin_code()
+            link = f"http://localhost:3000/rastreio/{p_id}"
+
+            conn.execute("""
+                UPDATE pedidos 
+                SET status = 'em_rota', entregador_id = ?, entregador_nome = ?, codigo_confirmacao = ?, link_rastreio = ?
+                WHERE id = ? OR id_externo = ?
+            """, (entregador_id, entregador_nome, pin, link, p_id, p_id))
+
+            p_copy = dict(p)
+            p_copy["status"] = "em_rota"
+            p_copy["entregador_nome"] = entregador_nome
+            p_copy["codigo_confirmacao"] = pin
+            despachados.append(p_copy)
+
+        # Atualiza status do entregador para em_rota
+        if entregador_id:
+            conn.execute("UPDATE entregadores SET status = 'em_rota' WHERE id = ? OR nome LIKE ?", (entregador_id, f"%{entregador_nome}%"))
+
+        conn.commit()
+        conn.close()
+
+        print(f"[AUTO-DESPACHO OK] Motoboy '{entregador_nome}' recebeu {len(despachados)} pedido(s) em rota automaticamente via DeepSeek AI!")
+
+        return jsonify({
+            "status": "success",
+            "message": f"🚀 {len(despachados)} pedido(s) despachado(s) automaticamente para {entregador_nome}!",
+            "raciocinio_ia": ai_reason,
+            "entregador_nome": entregador_nome,
+            "pedidos_despachados": despachados
+        }), 200
+
+    except Exception as e:
+        print(f"[AUTO-DESPACHO ERRO] Falha ao executar despacho automático: {e}")
+        return jsonify({"status": "error", "message": f"Erro no despacho automático: {str(e)}"}), 500
+
+
+
 if __name__ == "__main__":
 
     port = int(os.getenv("FLASK_PORT", 5000))

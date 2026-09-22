@@ -28,6 +28,8 @@ import {
 } from 'lucide-react';
 import { Pedido } from '@/lib/supabase';
 import { getBackendUrl } from '@/lib/backend';
+import { IFoodConfirmationModal } from '@/components/IFoodConfirmationModal';
+import { analyzeOrderItems } from '@/lib/beverageDetection';
 
 interface DriverSession {
   id: string;
@@ -60,11 +62,15 @@ export default function MotoboyAppPage() {
   const [loading, setLoading] = useState(false);
   const [selectedPedido, setSelectedPedido] = useState<Pedido | null>(null);
 
+  // iFood Confirmation Modal State
+  const [isIFoodModalOpen, setIsIFoodModalOpen] = useState(false);
+
   // PIN Modal State
   const [isPinModalOpen, setIsPinModalOpen] = useState(false);
   const [pinDigitado, setPinDigitado] = useState('');
   const [pinError, setPinError] = useState('');
   const [isSubmittingPin, setIsSubmittingPin] = useState(false);
+  const [isAutoDispatching, setIsAutoDispatching] = useState(false);
 
   // OSRM Turn-by-Turn Navigation State
   const [osrmSteps, setOsrmSteps] = useState<any[]>([]);
@@ -339,6 +345,34 @@ export default function MotoboyAppPage() {
     const interval = setInterval(fetchPedidos, 5000);
     return () => clearInterval(interval);
   }, [driver]);
+
+  // Automação DeepSeek AI: Ao Chegar na Loja
+  const handleTriggerAutoDispatch = async () => {
+    if (!driver) return;
+    setIsAutoDispatching(true);
+    try {
+      const res = await fetch(`${backendUrl}/api/ai/auto-despacho`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          entregador_id: driver.id,
+          entregador_nome: driver.nome
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'success') {
+        playNotificationSound('new_order');
+        alert(data.message || '🚀 Rota enviada automaticamente pelo DeepSeek AI!');
+        fetchPedidos();
+      } else if (data.status === 'warning') {
+        alert(data.message);
+      }
+    } catch (e) {
+      console.error('Erro no auto-despacho:', e);
+    } finally {
+      setIsAutoDispatching(false);
+    }
+  };
 
   // Iniciar Rota
   const handleStartRoute = async (pedido: Pedido) => {
@@ -749,6 +783,20 @@ export default function MotoboyAppPage() {
 
         {/* FEED DE PEDIDOS DA FILA */}
         <div className="space-y-3">
+          {/* BOTÃO DA AUTOMAÇÃO DE CHEGADA NA LOJA */}
+          <button
+            onClick={handleTriggerAutoDispatch}
+            disabled={isAutoDispatching}
+            className="w-full py-3.5 px-4 bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-xs rounded-2xl shadow-xl transition-all flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-98 border border-amber-300/40"
+          >
+            <Zap className={`w-4 h-4 text-slate-950 ${isAutoDispatching ? 'animate-bounce' : ''}`} />
+            <span>
+              {isAutoDispatching
+                ? '🤖 DeepSeek AI Roteirizando Seus Pedidos...'
+                : '🛵 Cheguei na Loja! Puxar Rota Automática (DeepSeek AI)'}
+            </span>
+          </button>
+
           <div className="flex items-center justify-between px-1">
             <h2 className="text-xs font-black text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
               <Truck className="w-4 h-4 text-amber-400" />
@@ -802,6 +850,26 @@ export default function MotoboyAppPage() {
                       {isEmRota ? 'EM ROTA' : 'PRONTO P/ ROTA'}
                     </span>
                   </div>
+
+                  {/* ALERTA DESTACADO DE BEBIDAS / SOBREMESAS */}
+                  {(() => {
+                    const analysis = analyzeOrderItems(pedido.itens);
+                    if (!analysis.hasSpecialItems) return null;
+                    return (
+                      <div className="p-2.5 bg-gradient-to-r from-amber-500/20 via-yellow-500/20 to-amber-500/20 border border-amber-500/50 rounded-xl text-center space-y-0.5 animate-pulse">
+                        <span className="text-[11px] font-black text-amber-300 block uppercase tracking-wide">
+                          ⚠️ CONFERIR BEBIDA/SOBREMESA GELADA ⚠️
+                        </span>
+                        <strong className="text-xs font-black text-amber-200 block underline uppercase">
+                          {analysis.hasBeverage && analysis.hasDessert
+                            ? '🥤 INCLUI BEBIDA GELADA & SOBREMESA! 🍰'
+                            : analysis.hasBeverage
+                            ? '🥤 INCLUI BEBIDA GELADA (PEGAR NA GELADEIRA)!'
+                            : '🍰 INCLUI SOBREMESA!'}
+                        </strong>
+                      </div>
+                    );
+                  })()}
 
                   {/* ENDEREÇO DO CLIENTE */}
                   <div className="space-y-1">
@@ -925,7 +993,7 @@ export default function MotoboyAppPage() {
                       <button
                         onClick={() => {
                           setSelectedPedido(pedido);
-                          setIsPinModalOpen(true);
+                          setIsIFoodModalOpen(true);
                         }}
                         className="py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-extrabold rounded-xl text-xs shadow-md flex items-center justify-center gap-1.5 transition"
                       >
@@ -934,11 +1002,14 @@ export default function MotoboyAppPage() {
                       </button>
 
                       <button
-                        onClick={() => handleFinalizarEntrega(pedido)}
+                        onClick={() => {
+                          setSelectedPedido(pedido);
+                          setIsIFoodModalOpen(true);
+                        }}
                         className="py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold rounded-xl text-xs shadow-md flex items-center justify-center gap-1.5 transition"
                       >
                         <CheckCircle2 className="w-4 h-4" />
-                        <span>✅ Concluir</span>
+                        <span>✅ Concluir Entrega</span>
                       </button>
                     </div>
                   )}
@@ -949,65 +1020,20 @@ export default function MotoboyAppPage() {
         </div>
       </main>
 
-      {/* MODAL DE VALIDAÇÃO DE PIN DE SEGURANÇA */}
-      {isPinModalOpen && selectedPedido && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-          <div className="w-full max-w-xs bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4 text-center">
-            <div className="w-12 h-12 bg-purple-500/20 text-purple-400 border border-purple-500/40 rounded-2xl flex items-center justify-center mx-auto">
-              <KeyRound className="w-6 h-6" />
-            </div>
-
-            <div>
-              <h3 className="font-extrabold text-slate-100 text-base">PIN de Confirmação</h3>
-              <p className="text-xs text-slate-400 mt-1">
-                Solicite os 4 dígitos ao cliente no momento da entrega do pedido #{selectedPedido.id_externo}
-              </p>
-            </div>
-
-            <input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={4}
-              autoFocus
-              placeholder="0 0 0 0"
-              value={pinDigitado}
-              onChange={(e) => {
-                const val = e.target.value.replace(/\D/g, '');
-                setPinDigitado(val);
-              }}
-              className="w-full text-center text-2xl font-mono font-black tracking-widest bg-slate-950 border border-purple-500/40 focus:border-purple-400 text-purple-300 rounded-xl py-3 outline-none shadow-inner"
-            />
-            <p className="text-[10px] text-slate-500">Dica: digite 9999 em caso de liberação de emergência pela loja.</p>
-
-            {pinError && (
-              <p className="text-xs font-bold text-red-400 bg-red-950/40 p-2 rounded-lg border border-red-500/30">
-                {pinError}
-              </p>
-            )}
-
-            <div className="grid grid-cols-2 gap-2 pt-2">
-              <button
-                onClick={() => {
-                  setIsPinModalOpen(false);
-                  setPinDigitado('');
-                }}
-                className="py-2.5 bg-slate-800 text-slate-300 font-bold rounded-xl text-xs"
-              >
-                Cancelar
-              </button>
-
-              <button
-                onClick={handleConfirmPin}
-                disabled={isSubmittingPin}
-                className="py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-extrabold rounded-xl text-xs shadow-md"
-              >
-                {isSubmittingPin ? 'Validando...' : 'Confirmar'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* MODAL INTELIGENTE DE CONFIRMAÇÃO E AUTOPREENCHIMENTO IFOOD */}
+      <IFoodConfirmationModal
+        pedido={selectedPedido}
+        isOpen={isIFoodModalOpen}
+        onClose={() => {
+          setIsIFoodModalOpen(false);
+          setSelectedPedido(null);
+        }}
+        onSuccess={() => {
+          playNotificationSound('success');
+          alert(`🎉 Pedido #${selectedPedido?.id_externo} entregue e confirmado com sucesso!`);
+          fetchPedidos();
+        }}
+      />
     </div>
   );
 }

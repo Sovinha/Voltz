@@ -57,6 +57,9 @@ export interface SystemSettings {
   mostrarPedidoNoMapa: boolean;
   coletaUmClique: boolean;
   janelaHistoricoDias: number;
+  // Novas Automações de IA e Destaque Visual
+  autoDespachoDeepSeek: boolean;
+  destacarBebidasComanda: boolean;
 }
 
 const DEFAULT_SETTINGS: SystemSettings = {
@@ -93,6 +96,8 @@ const DEFAULT_SETTINGS: SystemSettings = {
   mostrarPedidoNoMapa: true,
   coletaUmClique: true,
   janelaHistoricoDias: 30,
+  autoDespachoDeepSeek: true,
+  destacarBebidasComanda: true,
 };
 
 export const ConfigTab: React.FC = () => {
@@ -472,6 +477,38 @@ export const ConfigTab: React.FC = () => {
                   <option value={30}>30 dias (padrão)</option>
                   <option value={60}>60 dias</option>
                 </select>
+              </div>
+            </div>
+
+            {/* Bloco 5: Automação DeepSeek AI & Alertas de Balcão */}
+            <div className="space-y-3 border-t border-slate-800 pt-4">
+              <h4 className="font-bold text-amber-400 text-xs flex items-center gap-1.5">
+                <Sliders className="w-4 h-4 text-amber-400" />
+                Automações de IA e Destaques de Expedição:
+              </h4>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <label
+                  onClick={() => toggleCheckbox('autoDespachoDeepSeek')}
+                  className="flex items-start gap-2.5 p-3 rounded-2xl bg-amber-950/20 border border-amber-500/40 hover:border-amber-500/60 cursor-pointer text-slate-200 transition-colors"
+                >
+                  {settings.autoDespachoDeepSeek ? <CheckSquare className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" /> : <Square className="w-4 h-4 text-slate-600 shrink-0 mt-0.5" />}
+                  <div>
+                    <strong className="text-xs text-amber-300 block font-bold">Automação DeepSeek AI ao Chegar Motoboy</strong>
+                    <span className="text-[11px] text-slate-400">Ao chegar na loja, o sistema calcula e despacha a rota ideal automaticamente.</span>
+                  </div>
+                </label>
+
+                <label
+                  onClick={() => toggleCheckbox('destacarBebidasComanda')}
+                  className="flex items-start gap-2.5 p-3 rounded-2xl bg-sky-950/20 border border-sky-500/40 hover:border-sky-500/60 cursor-pointer text-slate-200 transition-colors"
+                >
+                  {settings.destacarBebidasComanda ? <CheckSquare className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" /> : <Square className="w-4 h-4 text-slate-600 shrink-0 mt-0.5" />}
+                  <div>
+                    <strong className="text-xs text-sky-300 block font-bold">Alertar Bebidas/Sobremesas na Comanda</strong>
+                    <span className="text-[11px] text-slate-400">Exibe caixa fluorescente de aviso e grifa refrigerantes e sobremesas no comprovante.</span>
+                  </div>
+                </label>
               </div>
             </div>
           </div>

@@ -4,6 +4,7 @@ import React from 'react';
 import { Printer, X, QrCode, Store, Clock, MapPin, Truck, CheckCircle2 } from 'lucide-react';
 import { Pedido } from '@/lib/supabase';
 import { LojaConfig } from './InteractiveMap';
+import { analyzeOrderItems, isBeverageItem, isDessertItem } from '@/lib/beverageDetection';
 
 interface PedidoExpedicaoModalProps {
   pedido: Pedido | null;
@@ -21,6 +22,8 @@ export const PedidoExpedicaoModal: React.FC<PedidoExpedicaoModalProps> = ({
   stopSequence,
 }) => {
   if (!isOpen || !pedido) return null;
+
+  const itemAnalysis = analyzeOrderItems(pedido.itens);
 
   const trackingUrl = typeof window !== 'undefined'
     ? `${window.location.origin}/tracking?id=${pedido.id_externo}`
@@ -80,6 +83,25 @@ export const PedidoExpedicaoModal: React.FC<PedidoExpedicaoModalProps> = ({
               )}
             </div>
 
+            {/* ALERTA DESTACADO: BEBIDAS E SOBREMESAS GELADAS */}
+            {itemAnalysis.hasSpecialItems && (
+              <div className="bg-amber-300 border-2 border-slate-900 p-2 rounded text-center my-2 space-y-0.5 animate-pulse">
+                <span className="text-[11px] font-black text-slate-950 uppercase block tracking-tight">
+                  ⚠️ ATENÇÃO MOTOBOY / EXPEDIÇÃO ⚠️
+                </span>
+                <strong className="text-xs font-black text-slate-950 block underline uppercase">
+                  {itemAnalysis.hasBeverage && itemAnalysis.hasDessert
+                    ? '🥤 INCLUI BEBIDA GELADA & SOBREMESA! 🍰'
+                    : itemAnalysis.hasBeverage
+                    ? '🥤 INCLUI BEBIDA GELADA (PEGAR NA GELADEIRA)!'
+                    : '🍰 INCLUI SOBREMESA!'}
+                </strong>
+                <span className="text-[9px] font-extrabold text-slate-900 block">
+                  CONFERIR ITENS NA GELADEIRA/FREEZER ANTES DE SAIR
+                </span>
+              </div>
+            )}
+
             {/* Código PIN de Confirmação no Comprovante */}
             {pedido.codigo_confirmacao && (
               <div className="bg-amber-100 border border-amber-400 p-2 rounded text-center">
@@ -116,12 +138,29 @@ export const PedidoExpedicaoModal: React.FC<PedidoExpedicaoModalProps> = ({
               </div>
 
               {Array.isArray(pedido.itens) && pedido.itens.length > 0 ? (
-                pedido.itens.map((item, i) => (
-                  <div key={i} className="flex justify-between text-[11px]">
-                    <span>{item.quantidade}x {item.nome}</span>
-                    <span>R$ {((item.preco_unitario || 0) * (item.quantidade || 1)).toFixed(2)}</span>
-                  </div>
-                ))
+                pedido.itens.map((item, i) => {
+                  const isBev = isBeverageItem(item.nome);
+                  const isDes = isDessertItem(item.nome);
+                  const isSpecial = isBev || isDes;
+
+                  return (
+                    <div 
+                      key={i} 
+                      className={`flex justify-between text-[11px] p-0.5 rounded ${
+                        isSpecial ? 'bg-amber-200 font-black text-slate-950 border border-slate-900' : ''
+                      }`}
+                    >
+                      <span className="flex items-center gap-1">
+                        {isBev && '🥤'}
+                        {isDes && '🍰'}
+                        <span className={isSpecial ? 'underline uppercase font-black' : ''}>
+                          {item.quantidade}x {item.nome}
+                        </span>
+                      </span>
+                      <span>R$ {((item.preco_unitario || 0) * (item.quantidade || 1)).toFixed(2)}</span>
+                    </div>
+                  );
+                })
               ) : (
                 <div className="flex justify-between text-[11px]">
                   <span>1x Pedido Trattoria Express</span>
