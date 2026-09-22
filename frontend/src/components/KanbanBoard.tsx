@@ -22,7 +22,11 @@ import {
   Flame,
   Timer,
   LayoutList,
-  Grid
+  Grid,
+  Trash2,
+  History,
+  Sparkles,
+  Calendar
 } from 'lucide-react';
 
 export const KanbanBoard: React.FC = () => {
@@ -30,6 +34,7 @@ export const KanbanBoard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [origemFilter, setOrigemFilter] = useState<'all' | 'web' | 'ifood'>('all');
+  const [timeFilter, setTimeFilter] = useState<'24h' | 'all'>('24h');
   const [onlyDelayedFilter, setOnlyDelayedFilter] = useState(false);
   const [slaThresholdMin, setSlaThresholdMin] = useState(15);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -41,6 +46,59 @@ export const KanbanBoard: React.FC = () => {
 
   // Modo de exibição: 'compact' (estilo barras enxutas da imagem) vs 'cards' (detalhado)
   const [viewStyle, setViewStyle] = useState<'compact' | 'cards'>('cards');
+
+  // Zerar TODOS os pedidos (Começar do zero)
+  const handleResetDatabase = async () => {
+    if (!window.confirm('⚠️ ATENÇÃO: Deseja ZERAR TODOS os pedidos e começar do zero? Todos os pedidos da tela e do banco serão apagados.')) {
+      return;
+    }
+    setLoading(true);
+    try {
+      const backendUrl = getBackendUrl();
+      await fetch(`${backendUrl}/api/pedidos/reset`, { method: 'POST' });
+      if (isSupabaseConfigured) {
+        await supabase.from('pedidos').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      }
+    } catch (e) {
+      console.warn('[AVISO] Falha ao zerar no backend Flask:', e);
+    }
+    try {
+      localStorage.removeItem('local_simulated_pedidos');
+    } catch {}
+    setPedidos([]);
+    setLoading(false);
+    alert('✅ Sistema zerado com sucesso! Prontinho para começar do zero.');
+  };
+
+  // Limpar pedidos com mais de 24 horas
+  const handleCleanOldOrders = async () => {
+    setLoading(true);
+    let msg = 'Pedidos com mais de 24h removidos.';
+    try {
+      const backendUrl = getBackendUrl();
+      const res = await fetch(`${backendUrl}/api/pedidos/limpar-antigos?horas=24`, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        msg = data.mensagem || msg;
+      }
+    } catch (e) {
+      console.warn('[AVISO] Falha ao limpar pedidos antigos no backend:', e);
+    }
+
+    try {
+      const localStr = localStorage.getItem('local_simulated_pedidos');
+      if (localStr) {
+        const local = JSON.parse(localStr);
+        const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const filtered = local.filter((p: Pedido) => p.created_at >= cutoff);
+        localStorage.setItem('local_simulated_pedidos', JSON.stringify(filtered));
+      }
+    } catch {}
+
+    await fetchPedidos();
+    setLoading(false);
+    alert(`✅ ${msg}`);
+  };
 
   // Busca inicial e periódica dos pedidos
   const fetchPedidos = useCallback(async () => {
@@ -223,7 +281,8 @@ export const KanbanBoard: React.FC = () => {
 
   const delayedOrdersCount = pedidos.filter(isOrderDelayed).length;
 
-  // Filtragem dos pedidos
+  // Filtragem dos pedidos (Pesquisa, Origem, SLA Atrasados e Período 24h)
+  const cutoff24hMs = Date.now() - 24 * 60 * 60 * 1000;
   const filteredPedidos = pedidos.filter((p) => {
     const matchesQuery =
       p.nome_cliente.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -233,7 +292,16 @@ export const KanbanBoard: React.FC = () => {
     const matchesOrigem = origemFilter === 'all' || p.origem === origemFilter;
     const matchesDelayed = !onlyDelayedFilter || isOrderDelayed(p);
 
-    return matchesQuery && matchesOrigem && matchesDelayed;
+    let matchesTime = true;
+    if (timeFilter === '24h' && p.created_at) {
+      try {
+        matchesTime = new Date(p.created_at).getTime() >= cutoff24hMs;
+      } catch {
+        matchesTime = true;
+      }
+    }
+
+    return matchesQuery && matchesOrigem && matchesDelayed && matchesTime;
   });
 
   const colPendente = filteredPedidos.filter((p) => p.status === 'pendente');
@@ -282,9 +350,9 @@ export const KanbanBoard: React.FC = () => {
       )}
 
       {/* Barra de Ferramentas e Estilos de Exibição */}
-      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 bg-slate-900/60 p-4 rounded-2xl border border-slate-800 backdrop-blur">
+      <div className="flex flex-col md:flex-row flex-wrap items-stretch md:items-center justify-between gap-4 bg-slate-900/60 p-4 rounded-2xl border border-slate-800 backdrop-blur">
         {/* Campo de Pesquisa */}
-        <div className="relative flex-1 max-w-md">
+        <div className="relative flex-1 min-w-[240px] max-w-md">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
@@ -293,6 +361,34 @@ export const KanbanBoard: React.FC = () => {
             placeholder="Buscar por cliente, id ou endereço..."
             className="w-full pl-9 pr-4 py-2 rounded-xl bg-slate-800/80 border border-slate-700/70 text-slate-100 text-sm focus:outline-none focus:border-sky-500 transition-colors"
           />
+        </div>
+
+        {/* Filtro de Janela de Tempo (24h vs Todas) */}
+        <div className="flex items-center gap-1 bg-slate-950/80 p-1 rounded-xl border border-slate-800">
+          <button
+            onClick={() => setTimeFilter('24h')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              timeFilter === '24h'
+                ? 'bg-amber-500 text-slate-950 font-bold shadow'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+            title="Exibir apenas pedidos recebidos nas últimas 24 horas"
+          >
+            <Clock className="w-3.5 h-3.5" />
+            <span>Últimas 24h</span>
+          </button>
+          <button
+            onClick={() => setTimeFilter('all')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              timeFilter === 'all'
+                ? 'bg-slate-700 text-slate-100 shadow'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+            title="Exibir todo o histórico de pedidos"
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            <span>Todas as Datas</span>
+          </button>
         </div>
 
         {/* Alternador de Estilo Visual (Compacto da Imagem vs Cards Detalhados) */}
@@ -355,8 +451,28 @@ export const KanbanBoard: React.FC = () => {
           </button>
         </div>
 
-        {/* Botão de Atualizar e Simular Pedido */}
+        {/* Ações de Limpeza e Novo Pedido */}
         <div className="flex items-center gap-2">
+          {/* Botão de Limpar Antigos (+24h) */}
+          <button
+            onClick={handleCleanOldOrders}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-amber-400 border border-amber-500/30 text-xs font-medium transition-all"
+            title="Apagar pedidos com mais de 24 horas"
+          >
+            <History className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden sm:inline">Limpar +24h</span>
+          </button>
+
+          {/* Botão de Zerar Pedidos (Começar do Zero) */}
+          <button
+            onClick={handleResetDatabase}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-bold transition-all shadow-sm"
+            title="Apagar TODOS os pedidos da tela e do banco para começar do zero"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+            <span>Zerar Pedidos</span>
+          </button>
+
           <button
             onClick={fetchPedidos}
             className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors border border-slate-700"

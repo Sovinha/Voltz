@@ -24,7 +24,8 @@ import {
   Check,
   Zap,
   Sparkles,
-  Users
+  Users,
+  Smartphone
 } from 'lucide-react';
 
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
@@ -389,6 +390,16 @@ export const DriverTab: React.FC = () => {
                       {/* Ações */}
                       <td className="py-4 px-4">
                         <div className="flex items-center justify-center gap-2">
+                          <a
+                            href={`/motoboy`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-1.5 bg-slate-800 hover:bg-slate-700 hover:text-amber-400 text-slate-400 rounded-lg transition"
+                            title="Abrir App do Entregador (PWA)"
+                          >
+                            <Smartphone className="w-4 h-4" />
+                          </a>
+
                           <button
                             onClick={() => {
                               setSettlementDriver(driver);

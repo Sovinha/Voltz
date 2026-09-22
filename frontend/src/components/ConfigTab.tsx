@@ -16,8 +16,14 @@ import {
   Square, 
   Eye, 
   Navigation,
-  Sliders
+  Sliders,
+  Trash2, 
+  History, 
+  Database,
+  AlertTriangle
 } from 'lucide-react';
+import { getBackendUrl } from '@/lib/backend';
+import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { LojaConfig } from './InteractiveMap';
 
 // Interface para as Faixas de Taxa de Entrega
@@ -97,6 +103,8 @@ export const ConfigTab: React.FC = () => {
   const [openSectionTaxas, setOpenSectionTaxas] = useState(true);
   const [openSectionFila, setOpenSectionFila] = useState(true);
   const [openSectionEntregadores, setOpenSectionEntregadores] = useState(true);
+  const [openSectionLimpeza, setOpenSectionLimpeza] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
 
   // Dados da loja para desenhar o raio no mapa
   const [loja] = useState<LojaConfig>({
@@ -118,7 +126,39 @@ export const ConfigTab: React.FC = () => {
   const handleSave = () => {
     localStorage.setItem('sistema_settings', JSON.stringify(settings));
     setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 2500);
+    setTimeout(() => setSavedSuccess(false), 3000);
+  };
+
+  const handleResetDatabase = async () => {
+    if (!window.confirm('⚠️ Tem certeza que deseja ZERAR todos os pedidos do sistema para começar do zero?')) return;
+    setActionLoading(true);
+    try {
+      const backendUrl = getBackendUrl();
+      await fetch(`${backendUrl}/api/pedidos/reset`, { method: 'POST' });
+      if (isSupabaseConfigured) {
+        await supabase.from('pedidos').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      }
+    } catch {}
+    try {
+      localStorage.removeItem('local_simulated_pedidos');
+    } catch {}
+    setActionLoading(false);
+    alert('✅ Banco de dados e pedidos zerados com sucesso!');
+  };
+
+  const handleCleanOldOrders = async () => {
+    setActionLoading(true);
+    let msg = 'Pedidos com mais de 24h removidos.';
+    try {
+      const backendUrl = getBackendUrl();
+      const res = await fetch(`${backendUrl}/api/pedidos/limpar-antigos?horas=24`, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        msg = data.mensagem || msg;
+      }
+    } catch {}
+    setActionLoading(false);
+    alert(`✅ ${msg}`);
   };
 
   const updateTaxaEntregador = (index: number, val: number) => {
@@ -432,6 +472,69 @@ export const ConfigTab: React.FC = () => {
                   <option value={30}>30 dias (padrão)</option>
                   <option value={60}>60 dias</option>
                 </select>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Seção 4: Gerenciamento de Dados do Banco e Limpeza (Zerar / 24 Horas) */}
+      <div className="bg-slate-900/60 rounded-2xl border border-slate-800 overflow-hidden shadow-xl backdrop-blur">
+        <button
+          onClick={() => setOpenSectionLimpeza(!openSectionLimpeza)}
+          className="w-full p-4 flex items-center justify-between bg-slate-900/80 hover:bg-slate-800/80 transition-colors text-left border-b border-slate-800/80"
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/20">
+              <Database className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-100 text-sm">Gerenciamento de Dados & Zerar Sistema</h3>
+              <p className="text-xs text-slate-400">Limpeza de pedidos antigos, reinício do zero ou auto-expiração em 24h</p>
+            </div>
+          </div>
+          {openSectionLimpeza ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+        </button>
+
+        {openSectionLimpeza && (
+          <div className="p-5 space-y-4 text-xs">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Opção 1: Limpar Pedidos +24h */}
+              <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+                <div className="flex items-center gap-2 text-amber-400 font-bold">
+                  <History className="w-4 h-4" />
+                  <span>Limpar Pedidos com Mais de 24 Horas</span>
+                </div>
+                <p className="text-slate-400">
+                  Remove automaticamente todos os pedidos antigos criados há mais de 24h, mantendo a tela limpa apenas com os pedidos do dia.
+                </p>
+                <button
+                  onClick={handleCleanOldOrders}
+                  disabled={actionLoading}
+                  className="w-full px-4 py-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 font-bold transition-all flex items-center justify-center gap-2"
+                >
+                  <History className="w-4 h-4" />
+                  <span>Excluir Pedidos com +24 Horas</span>
+                </button>
+              </div>
+
+              {/* Opção 2: Zerar Todos os Pedidos */}
+              <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+                <div className="flex items-center gap-2 text-rose-400 font-bold">
+                  <Trash2 className="w-4 h-4" />
+                  <span>Zerar Todos os Pedidos (Começar do Zero)</span>
+                </div>
+                <p className="text-slate-400">
+                  Apaga 100% dos pedidos do banco de dados e da memória local, zerando o painel para iniciar um novo expediente do zero.
+                </p>
+                <button
+                  onClick={handleResetDatabase}
+                  disabled={actionLoading}
+                  className="w-full px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold transition-all flex items-center justify-center gap-2 shadow-lg shadow-rose-600/20"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>Zerar Banco &amp; Começar do Zero</span>
+                </button>
               </div>
             </div>
           </div>

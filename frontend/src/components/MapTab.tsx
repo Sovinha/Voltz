@@ -156,13 +156,41 @@ export const MapTab: React.FC = () => {
     }
   };
 
+  const handleResetDatabase = async () => {
+    if (!window.confirm('⚠️ ATENÇÃO: Deseja ZERAR TODOS os pedidos da tela e do mapa para começar do zero?')) {
+      return;
+    }
+    try {
+      const backendUrl = getBackendUrl();
+      await fetch(`${backendUrl}/api/pedidos/reset`, { method: 'POST' });
+      if (isSupabaseConfigured) {
+        await supabase.from('pedidos').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      }
+    } catch (e) {
+      console.warn('[AVISO] Falha ao zerar no backend:', e);
+    }
+    try {
+      localStorage.removeItem('local_simulated_pedidos');
+    } catch {}
+    setPedidos([]);
+    setSelectedPedido(null);
+    setSelectedBatchIds([]);
+    setOrderedBatch([]);
+    alert('✅ Mapa e pedidos zerados com sucesso!');
+  };
+
   const fetchPedidos = useCallback(async () => {
     if (isSupabaseConfigured) {
       try {
         const { data } = await supabase.from('pedidos').select('*').order('created_at', { ascending: false });
         const local = getLocalOrders();
-        if (data) setPedidos([...local, ...data as Pedido[]]);
-        else setPedidos(local);
+        if (data && data.length > 0) {
+          const dbIds = new Set(data.map((p) => p.id));
+          const uniqueLocal = local.filter((p) => !dbIds.has(p.id));
+          setPedidos([...uniqueLocal, ...(data as Pedido[])]);
+        } else {
+          setPedidos(local);
+        }
       } catch {
         setPedidos(getLocalOrders());
       }
@@ -656,6 +684,15 @@ export const MapTab: React.FC = () => {
           >
             <Zap className="w-3.5 h-3.5 fill-slate-950" />
             <span className="hidden md:inline">⚡ Webhook</span>
+          </button>
+
+          <button
+            onClick={handleResetDatabase}
+            className="px-2.5 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 font-bold text-xs transition-all flex items-center gap-1 shadow"
+            title="Apagar todos os pedidos e zerar o mapa"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+            <span className="hidden md:inline">Zerar Pedidos</span>
           </button>
 
           <button

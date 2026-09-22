@@ -12,7 +12,7 @@ import json
 import asyncio
 
 # Importa a aplicação Flask
-from app import app
+from app import app, init_local_db
 
 class TestDeliveryBackend(unittest.TestCase):
 
@@ -90,6 +90,11 @@ class TestDeliveryBackend(unittest.TestCase):
 
 
 class TestPlaywrightScraper(unittest.TestCase):
+
+    def setUp(self):
+        self.app = app.test_client()
+        self.app.testing = True
+        init_local_db()
 
     def test_ifood_scraper_execution(self):
         """Testa o script do Playwright executando no browser Chromium Headless."""

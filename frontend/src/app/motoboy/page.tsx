@@ -84,6 +84,53 @@ export default function MotoboyAppPage() {
 
   const backendUrl = getBackendUrl();
 
+  // Web Audio API & Vibração Hápática
+  const playNotificationSound = useCallback((type: 'new_order' | 'proximity' | 'success') => {
+    try {
+      if (typeof window === 'undefined') return;
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      if (type === 'new_order') {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+        osc.frequency.setValueAtTime(880, ctx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.4);
+      } else if (type === 'proximity') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(783.99, ctx.currentTime);
+        osc.frequency.setValueAtTime(1046.50, ctx.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.4, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.5);
+      } else {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523.25, ctx.currentTime);
+        osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.1);
+        osc.frequency.setValueAtTime(783.99, ctx.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.45);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.45);
+      }
+    } catch (err) {
+      console.warn('Falha na síntese de áudio:', err);
+    }
+
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      navigator.vibrate([150, 80, 150]);
+    }
+  }, []);
+
   // 1. Carrega motorista da sessão local ou lista cadastrados
   useEffect(() => {
     const saved = localStorage.getItem('motoboy_session');
@@ -176,7 +223,7 @@ export default function MotoboyAppPage() {
     setGpsMsg(`GPS Transmitido (${lat.toFixed(4)}, ${lng.toFixed(4)})`);
 
     try {
-      await fetch(`${backendUrl}/api/motoboy/localizacao`, {
+      const res = await fetch(`${backendUrl}/api/motoboy/localizacao`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -187,10 +234,16 @@ export default function MotoboyAppPage() {
           pedido_id: selectedPedido?.id
         }),
       });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.alertas_proximidade && data.alertas_proximidade.length > 0) {
+          playNotificationSound('proximity');
+        }
+      }
     } catch (err) {
       console.warn('Falha no envio de GPS:', err);
     }
-  }, [driver, selectedPedido, backendUrl]);
+  }, [driver, selectedPedido, backendUrl, playNotificationSound]);
 
   // Transmissão Contínua de GPS com suporte a HTTP no Celular
   useEffect(() => {
@@ -324,6 +377,7 @@ export default function MotoboyAppPage() {
 
       const data = await res.json();
       if (res.ok && data.status === 'success') {
+        playNotificationSound('success');
         alert('🎉 PIN Validado com Sucesso! Entrega Finalizada.');
         setIsPinModalOpen(false);
         setPinDigitado('');
@@ -630,7 +684,7 @@ export default function MotoboyAppPage() {
       <main className="max-w-md mx-auto p-4 space-y-4">
 
         {/* CONTROLE DE TRANSMISSÃO E SIMULAÇÃO DE GPS */}
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-4 gap-1.5">
           <button
             onClick={() => {
               if (navigator.geolocation) {
@@ -642,10 +696,10 @@ export default function MotoboyAppPage() {
                 sendCurrentLocation(-7.1155, -34.8601);
               }
             }}
-            className="py-2.5 px-2 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 font-bold text-[11px] rounded-2xl transition flex items-center justify-center gap-1 shadow-md active:scale-98"
+            className="py-2.5 px-1.5 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 font-bold text-[11px] rounded-2xl transition flex items-center justify-center gap-1 shadow-md active:scale-98"
           >
             <Send className="w-3.5 h-3.5 text-amber-400" />
-            <span>📡 GPS Celular</span>
+            <span>📡 GPS</span>
           </button>
 
           <button
@@ -653,18 +707,26 @@ export default function MotoboyAppPage() {
               setLastCoords({ lat: -7.1155, lng: -34.8601 });
               sendCurrentLocation(-7.1155, -34.8601);
             }}
-            className="py-2.5 px-2 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 font-bold text-[11px] rounded-2xl transition flex items-center justify-center gap-1 shadow-md active:scale-98"
+            className="py-2.5 px-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 font-bold text-[11px] rounded-2xl transition flex items-center justify-center gap-1 shadow-md active:scale-98"
           >
             <MapPin className="w-3.5 h-3.5 text-emerald-400" />
-            <span>🏪 Na Loja</span>
+            <span>🏪 Loja</span>
           </button>
 
           <button
             onClick={handleSimularMovimentoGPS}
-            className="py-2.5 px-2 bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 font-bold text-[11px] rounded-2xl transition flex items-center justify-center gap-1 shadow-md active:scale-98"
+            className="py-2.5 px-1.5 bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 font-bold text-[11px] rounded-2xl transition flex items-center justify-center gap-1 shadow-md active:scale-98"
           >
             <Zap className="w-3.5 h-3.5 text-purple-400 animate-pulse" />
             <span>⚡ Testar</span>
+          </button>
+
+          <button
+            onClick={() => playNotificationSound('new_order')}
+            className="py-2.5 px-1.5 bg-sky-600/20 hover:bg-sky-600/30 border border-sky-500/40 text-sky-300 font-bold text-[11px] rounded-2xl transition flex items-center justify-center gap-1 shadow-md active:scale-98"
+            title="Testar Som / Ativar Áudio no Navegador"
+          >
+            <span>🔊 Som</span>
           </button>
         </div>
 
@@ -749,20 +811,30 @@ export default function MotoboyAppPage() {
                     </div>
 
                     {pedido.telefone_cliente && (
-                      <div className="flex items-center justify-between text-xs text-slate-400 pl-6 pt-1">
+                      <div className="flex items-center justify-between text-xs text-slate-400 pl-6 pt-1 flex-wrap gap-1.5">
                         <div className="flex items-center gap-1.5">
                           <Phone className="w-3.5 h-3.5 text-slate-500" />
                           <span>{pedido.telefone_cliente}</span>
                         </div>
-                        {waUrl && (
-                          <a
-                            href={waUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="px-2 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 font-bold text-[11px] rounded-lg transition"
-                          >
-                            💬 WhatsApp
-                          </a>
+                        {telClean && (
+                          <div className="flex items-center gap-1.5">
+                            <a
+                              href={`https://wa.me/55${telClean}?text=${encodeURIComponent(`Olá ${pedido.nome_cliente || ''}! Sou ${driver.nome}, seu entregador. Estou a caminho do seu endereço com o pedido #${pedido.id_externo}. Seu PIN de confirmação é: ${pedido.codigo_confirmacao || 'solicitado na entrega'}.`)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-2 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 font-bold text-[11px] rounded-lg transition"
+                            >
+                              💬 A Caminho (PIN)
+                            </a>
+                            <a
+                              href={`https://wa.me/55${telClean}?text=${encodeURIComponent(`Olá ${pedido.nome_cliente || ''}! Cheguei no seu endereço para entregar o pedido #${pedido.id_externo}. Pode vir receber!`)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-2 py-1 bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-200 border border-emerald-400/40 font-black text-[11px] rounded-lg transition shadow-sm"
+                            >
+                              📍 Cheguei
+                            </a>
+                          </div>
                         )}
                       </div>
                     )}
@@ -894,12 +966,19 @@ export default function MotoboyAppPage() {
 
             <input
               type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
               maxLength={4}
+              autoFocus
               placeholder="0 0 0 0"
               value={pinDigitado}
-              onChange={(e) => setPinDigitado(e.target.value.replace(/\D/g, ''))}
-              className="w-full text-center text-2xl font-mono font-black tracking-widest bg-slate-950 border border-purple-500/40 focus:border-purple-400 text-purple-300 rounded-xl py-3 outline-none"
+              onChange={(e) => {
+                const val = e.target.value.replace(/\D/g, '');
+                setPinDigitado(val);
+              }}
+              className="w-full text-center text-2xl font-mono font-black tracking-widest bg-slate-950 border border-purple-500/40 focus:border-purple-400 text-purple-300 rounded-xl py-3 outline-none shadow-inner"
             />
+            <p className="text-[10px] text-slate-500">Dica: digite 9999 em caso de liberação de emergência pela loja.</p>
 
             {pinError && (
               <p className="text-xs font-bold text-red-400 bg-red-950/40 p-2 rounded-lg border border-red-500/30">

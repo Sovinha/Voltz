@@ -43,12 +43,11 @@ class TestNewDeliveryFeatures(unittest.TestCase):
         print(f"[TEST PASS] PIN gerado com sucesso: {pin_code}")
         print(f"[TEST PASS] Link de Rastreio: {data_despacho['link_rastreio']}")
 
-        # 3. Teste de Rastreamento de GPS do Motoboy a < 500m (Proximidade)
-        # Coordenadas a ~300 metros do cliente (-7.1155, -34.8601)
+        # Coordenadas a ~15 metros do cliente geocodificado em Av. Epitácio Pessoa (-7.119616, -34.852368)
         gps_payload = {
             "pedido_id": pedido_id,
-            "latitude": -7.1170,
-            "longitude": -34.8601
+            "latitude": -7.1197,
+            "longitude": -34.8524
         }
         res_gps = self.app.post("/api/motoboy/localizacao", data=json.dumps(gps_payload), content_type="application/json")
         self.assertEqual(res_gps.status_code, 200)

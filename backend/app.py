@@ -412,18 +412,64 @@ def resetar_pedidos_teste():
     }), 200
 
 
-@app.route("/api/pedidos", methods=["GET"])
-def listar_pedidos():
-    """Retorna todos os pedidos (usado no modo local sem Supabase)."""
+@app.route("/api/pedidos/limpar-antigos", methods=["POST", "DELETE"])
+def limpar_pedidos_antigos():
+    """Exclui pedidos criados há mais de N horas (padrão: 24 horas)."""
+    horas = request.args.get("horas", default=24, type=int)
+    cutoff = (datetime.now() - timedelta(hours=horas)).isoformat()
+    
+    deleted_count = 0
     if supabase:
         try:
-            res = supabase.table("pedidos").select("*").order("created_at", desc=True).execute()
+            res = supabase.table("pedidos").delete().lt("created_at", cutoff).execute()
+            if res and hasattr(res, 'data') and res.data:
+                deleted_count += len(res.data)
+        except Exception as e:
+            print(f"[AVISO] Erro ao excluir antigos no Supabase: {e}")
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.execute("DELETE FROM pedidos WHERE created_at < ?", (cutoff,))
+        deleted_count += cursor.rowcount
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[ERRO DB] Falha ao limpar pedidos antigos no SQLite: {e}")
+
+    print(f"[LIMPEZA OK] {deleted_count} pedido(s) com mais de {horas}h foram removidos!")
+    return jsonify({
+        "status": "success",
+        "mensagem": f"{deleted_count} pedido(s) com mais de {horas}h foram removidos.",
+        "removidos": deleted_count
+    }), 200
+
+
+@app.route("/api/pedidos", methods=["GET"])
+def listar_pedidos():
+    """
+    Retorna pedidos (usado no modo local ou Supabase).
+    Suporta filtro por tempo limite em horas via parâmetro 'horas' (ex: ?horas=24).
+    """
+    horas = request.args.get("horas", type=int)
+    cutoff = None
+    if horas and horas > 0:
+        cutoff = (datetime.now() - timedelta(hours=horas)).isoformat()
+
+    if supabase:
+        try:
+            query = supabase.table("pedidos").select("*").order("created_at", desc=True)
+            if cutoff:
+                query = query.gte("created_at", cutoff)
+            res = query.execute()
             return jsonify(res.data), 200
         except Exception as e:
             return jsonify({"error": str(e)}), 500
     else:
         conn = get_db_connection()
-        rows = conn.execute("SELECT * FROM pedidos ORDER BY created_at DESC").fetchall()
+        if cutoff:
+            rows = conn.execute("SELECT * FROM pedidos WHERE created_at >= ? ORDER BY created_at DESC", (cutoff,)).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM pedidos ORDER BY created_at DESC").fetchall()
         conn.close()
         
         pedidos = []
@@ -717,68 +763,135 @@ def remove_accents(text):
     return ''.join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn')
 
 
+def _extract_address_parts(address_str):
+    """
+    Extrai CEP, bairro e endereço limpo de uma string de endereço.
+    Preserva o bairro e o CEP que antes eram perdidos na limpeza.
+    """
+    raw = address_str.strip()
+
+    # 1. Extrair CEP antes de remover parênteses
+    cep = None
+    cep_match = re.search(r'(\d{5})-?(\d{3})', raw)
+    if cep_match:
+        cep = f"{cep_match.group(1)}-{cep_match.group(2)}"
+
+    # 2. Extrair bairro ANTES da limpeza - procura padrão " - Bairro" ou ", Bairro,"
+    bairro = None
+    # Padrão: " - NomeBairro" (comum em endereços do iFood)
+    bairro_match = re.search(r'\s*-\s*([A-ZÀ-Ú][a-zà-ú]+(?:\s+(?:d[aoe]s?|D[aoe]s?)\s+[A-ZÀ-Ú][a-zà-ú]+|(?:\s+[A-ZÀ-Ú][a-zà-ú]+))*)\s*(?:,|$|-)', raw)
+    if bairro_match:
+        candidate_bairro = bairro_match.group(1).strip()
+        # Não considerar se for a cidade ou estado
+        skip_terms = ['joão pessoa', 'joao pessoa', 'paraíba', 'paraiba', 'pb', 'brasil']
+        if candidate_bairro.lower() not in skip_terms and len(candidate_bairro) > 2:
+            bairro = candidate_bairro
+
+    # 3. Remover conteúdo entre parênteses (CEP, observações)
+    clean = re.sub(r'\([^\)]*\)', ' ', raw)
+
+    # 4. Remover APENAS os complementos (não tudo depois deles)
+    # Antes: "Apt 1002 - Tambaú" → removia tudo = perdia Tambaú
+    # Agora: "Apt 1002" → remove só o complemento e seu valor
+    complement_patterns = [
+        r',?\s*\b(ap|apt|apto|apartamento)\s*\d*\b',
+        r',?\s*\b(bloco|bl)\s*[A-Za-z0-9]*\b',
+        r',?\s*\b(res|residencial|ed|edificio|edifício)\s+[A-Za-z0-9\s]*\b',
+        r',?\s*\b(andar|pensionato)\s*\d*\b',
+        r',?\s*\b(fundos|loja|casa)\s*\d*\b',
+        r',?\s*\b(quadra|lote)\s*[A-Za-z0-9]*\b',
+        r',?\s*\b(condominio|condom[ií]nio)\s+[A-Za-z0-9\s]*\b',
+    ]
+    for pattern in complement_patterns:
+        clean = re.sub(pattern, '', clean, flags=re.IGNORECASE)
+
+    # 5. Remover observações de referência (essas SIM podem ser removidas com tudo depois)
+    ref_patterns = [
+        r'\s*-?\s*\b[Pp]r[oó]x\.?\s.*$',
+        r'\b(por tr[aá]s|pr[oó]ximo|ao lado|em frente|ponto de refer[eê]ncia|refer[eê]ncia)\b.*$',
+    ]
+    for pattern in ref_patterns:
+        clean = re.sub(pattern, '', clean, flags=re.IGNORECASE)
+
+    clean = re.sub(r'\s+', ' ', clean).strip(' ,\t\n-')
+
+    return clean, cep, bairro
+
+
 def generate_geocode_candidates(address_str):
     if not address_str or not isinstance(address_str, str):
         return []
 
-    raw = address_str.strip()
-    raw = re.sub(r'\([^\)]*\)', ' ', raw)
-
-    # Remove complementos e observações de entrega comuns no final do endereço
-    complement_patterns = [
-        r'\b(ap|apt|apto|apartamento|bloco|bl|res|residencial|ed|edificio|edifício)\b.*',
-        r'\b(por tr[aá]s|pr[oó]ximo|ao lado|em frente|frente|ref|refer[eê]ncia|ponto de refer[eê]ncia)\b.*',
-        r'\b(casa|loja|fundos|andar|pensionato|condominio|condom[ií]nio|quadra|lote)\b.*',
-    ]
-    for pattern in complement_patterns:
-        raw = re.sub(pattern, '', raw, flags=re.IGNORECASE)
-
-    unaccented = remove_accents(raw).strip(', -')
+    clean, cep, bairro = _extract_address_parts(address_str)
+    unaccented = remove_accents(clean).strip(', -')
     unaccented = re.sub(r'\s+', ' ', unaccented).strip()
     if not unaccented:
         return []
 
+    # Extrair nome de rua e número
+    street_prefix_re = r'^(rua|av\.?|avenida|r\.?|tv\.?|travessa|prc\.?|praca|alameda|prof\.?|professor|dr\.?|doutor)\s+'
+    noprefix = re.sub(street_prefix_re, '', unaccented, flags=re.IGNORECASE).strip()
+
+    # Extrair número da casa
+    num_match = re.search(r'(?:,\s*|\s+)(\d{1,5})(?:\s*[-,]|\s|$)', noprefix or unaccented)
+    house_number = num_match.group(1) if num_match else None
+
+    # Extrair nome da rua (parte textual antes do número)
+    street_match = re.search(r'^([A-Za-z\s]+?)(?:\s*,\s*|\s+)\d', noprefix or unaccented)
+    street_name = street_match.group(1).strip() if street_match else None
+
+    # Extrair prefixo da rua (Rua, Av, etc) do original
+    prefix_match = re.match(street_prefix_re, unaccented, flags=re.IGNORECASE)
+    street_with_prefix = f"{prefix_match.group(1)} {street_name}" if prefix_match and street_name else None
+
+    bairro_clean = remove_accents(bairro).strip() if bairro else None
+
     candidates = []
 
-    # 1. Base clean query + Joao Pessoa
-    if 'joao pessoa' in unaccented.lower():
-        c1 = unaccented
-    else:
-        c1 = f"{unaccented}, Joao Pessoa"
-    candidates.append(c1)
+    # Candidato 0 (PRIORITÁRIO): Busca estruturada com rua + número + bairro + cidade
+    # Este formato é o mais preciso para Nominatim
+    if street_with_prefix and house_number and bairro_clean:
+        c0 = f"{street_with_prefix}, {house_number}, {bairro_clean}, Joao Pessoa, Paraiba, Brasil"
+        candidates.append(c0)
+    elif street_name and house_number and bairro_clean:
+        c0 = f"{street_name}, {house_number}, {bairro_clean}, Joao Pessoa, Paraiba, Brasil"
+        candidates.append(c0)
 
-    # 2. Base clean query + PB, Brasil
-    if 'brasil' not in c1.lower():
-        candidates.append(f"{c1}, PB, Brasil")
-
-    # 3. Strip prefix (Rua, Avenida, Av, R, etc)
-    noprefix = re.sub(r'^(rua|av\.|avenida|r\.|tv\.|travessa|prc\.|praça|alameda|prof\.|professor|dr\.|doutor)\s+', '', unaccented, flags=re.IGNORECASE).strip()
-    if noprefix and noprefix != unaccented:
-        if 'joao pessoa' in noprefix.lower():
-            c3 = noprefix
+    # Candidato 1: Endereço limpo com bairro preservado + cidade
+    if bairro_clean:
+        # Remove a parte da cidade/estado se já tiver e adiciona com bairro
+        base = re.sub(r',?\s*(joao pessoa|jo[aã]o pessoa|pb|para[ií]ba|brasil).*$', '', unaccented, flags=re.IGNORECASE).strip(', -')
+        if bairro_clean.lower() not in base.lower():
+            c1 = f"{base}, {bairro_clean}, Joao Pessoa, PB, Brasil"
         else:
-            c3 = f"{noprefix}, Joao Pessoa"
-        if c3 not in candidates:
-            candidates.append(c3)
+            c1 = f"{base}, Joao Pessoa, PB, Brasil"
+        if c1 not in candidates:
+            candidates.append(c1)
 
-    # 4. Extract street name + house number explicitly
-    match_num = re.search(r'([A-Za-z\s]+?)(?:,\s*|\s+)(\d+)', noprefix or unaccented)
-    if match_num:
-        st_name = match_num.group(1).strip()
-        num_val = match_num.group(2).strip()
-        if len(st_name) > 3:
-            c4 = f"{st_name}, {num_val}, Joao Pessoa"
-            if c4 not in candidates:
-                candidates.append(c4)
+    # Candidato 2: Endereço limpo completo
+    if 'joao pessoa' in unaccented.lower():
+        c2 = unaccented
+    else:
+        c2 = f"{unaccented}, Joao Pessoa"
+    if c2 not in candidates:
+        candidates.append(c2)
 
-    # 5. Extract street name only
-    match_st = re.search(r'([A-Za-z\s]+)', noprefix or unaccented)
-    if match_st:
-        st_name = match_st.group(1).strip()
-        if len(st_name) > 3:
-            c5 = f"{st_name}, Joao Pessoa"
-            if c5 not in candidates:
-                candidates.append(c5)
+    # Candidato 3: Com PB, Brasil
+    c3 = f"{c2}, PB, Brasil" if 'brasil' not in c2.lower() else c2
+    if c3 not in candidates:
+        candidates.append(c3)
+
+    # Candidato 4: Rua + número + Joao Pessoa (sem bairro)
+    if street_name and house_number:
+        c4 = f"{street_name}, {house_number}, Joao Pessoa, PB, Brasil"
+        if c4 not in candidates:
+            candidates.append(c4)
+
+    # Candidato 5: Só nome da rua + cidade
+    if street_name and len(street_name) > 3:
+        c5 = f"{street_name}, Joao Pessoa"
+        if c5 not in candidates:
+            candidates.append(c5)
 
     return candidates
 
@@ -786,12 +899,88 @@ def generate_geocode_candidates(address_str):
 def geocode_address(address_str):
     """
     Converte um endereço textual em coordenadas (latitude, longitude) reais com precisão de rua e número em João Pessoa/PB.
-    Testa candidatos sequenciais de busca com OpenStreetMap Nominatim e faz fallback gracioso para o bairro.
+    Usa busca estruturada + free-form com OpenStreetMap Nominatim e faz fallback gracioso para o bairro.
     """
     if not address_str or not isinstance(address_str, str):
         return -7.1155, -34.8601
 
     headers = {"User-Agent": "VoltzLogisticsSystem/3.0 (contact: admin@voltzdelivery.com.br)"}
+
+    # Extrair CEP e partes do endereço
+    clean, cep, bairro = _extract_address_parts(address_str)
+
+    # Tentativa 0: Busca estruturada por CEP (mais precisa quando disponível)
+    if cep:
+        try:
+            r = requests.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={
+                    "postalcode": cep,
+                    "country": "Brasil",
+                    "format": "json",
+                    "limit": 1,
+                    "addressdetails": 1
+                },
+                headers=headers,
+                timeout=3
+            )
+            if r.status_code == 200:
+                data = r.json()
+                if data and len(data) > 0:
+                    lat, lng = sanitize_coords(data[0]["lat"], data[0]["lon"])
+                    print(f"[GEOCODE CEP] CEP '{cep}' -> ({lat}, {lng})", file=sys.stderr, flush=True)
+                    # CEP dá boa precisão de trecho de rua, usar como base
+                    # mas continuar para ver se a busca por endereço completo é mais precisa
+                    cep_lat, cep_lng = lat, lng
+                else:
+                    cep_lat, cep_lng = None, None
+            else:
+                cep_lat, cep_lng = None, None
+        except Exception as e:
+            print(f"[GEOCODE WARN] CEP '{cep}' indisponível: {e}", file=sys.stderr, flush=True)
+            cep_lat, cep_lng = None, None
+    else:
+        cep_lat, cep_lng = None, None
+
+    # Tentativa 1: Busca estruturada com street/city (mais precisa para número)
+    street_prefix_re = r'^(rua|av\.?|avenida|r\.?|tv\.?|travessa|prc\.?|praca|alameda|prof\.?|professor|dr\.?|doutor)\s+'
+    unaccented = remove_accents(clean).strip(', -')
+    noprefix = re.sub(street_prefix_re, '', unaccented, flags=re.IGNORECASE).strip()
+    num_match = re.search(r'(?:,\s*|\s+)(\d{1,5})(?:\s*[-,]|\s|$)', unaccented)
+    house_number = num_match.group(1) if num_match else None
+
+    if house_number:
+        # Extrair a parte da rua (com prefixo)
+        street_part = re.split(r',\s*\d|(?<=[a-zA-Z])\s+\d', unaccented)[0].strip()
+        if street_part and len(street_part) > 3:
+            try:
+                structured_params = {
+                    "street": f"{house_number} {street_part}",
+                    "city": "João Pessoa",
+                    "state": "Paraíba",
+                    "country": "Brasil",
+                    "format": "json",
+                    "limit": 1,
+                    "addressdetails": 1
+                }
+                if cep:
+                    structured_params["postalcode"] = cep
+                r = requests.get(
+                    "https://nominatim.openstreetmap.org/search",
+                    params=structured_params,
+                    headers=headers,
+                    timeout=3
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    if data and len(data) > 0:
+                        lat, lng = sanitize_coords(data[0]["lat"], data[0]["lon"])
+                        print(f"[GEOCODE ESTRUTURADO] '{house_number} {street_part}' -> ({lat}, {lng})", file=sys.stderr, flush=True)
+                        return lat, lng
+            except Exception as e:
+                print(f"[GEOCODE WARN] Busca estruturada indisponível: {e}", file=sys.stderr, flush=True)
+
+    # Tentativa 2: Candidatos free-form (fallback progressivo)
     candidates = generate_geocode_candidates(address_str)
 
     for cand in candidates:
@@ -800,7 +989,7 @@ def geocode_address(address_str):
                 "https://nominatim.openstreetmap.org/search",
                 params={"q": cand, "format": "json", "limit": 1},
                 headers=headers,
-                timeout=1.5
+                timeout=3
             )
             if r.status_code == 200:
                 data = r.json()
@@ -811,7 +1000,12 @@ def geocode_address(address_str):
         except Exception as e:
             print(f"[GEOCODE WARN] Candidato '{cand}' indisponível: {e}", file=sys.stderr, flush=True)
 
-    # Fallback por Bairros com validação de limite de palavras (\b)
+    # Tentativa 3: Usar resultado do CEP se disponível
+    if cep_lat is not None and cep_lng is not None:
+        print(f"[GEOCODE FALLBACK CEP] '{address_str}' -> ({cep_lat}, {cep_lng}) via CEP {cep}", file=sys.stderr, flush=True)
+        return cep_lat, cep_lng
+
+    # Tentativa 4: Fallback por Bairros com validação de limite de palavras (\b)
     addr_low = remove_accents(address_str).lower()
     bairros_jp = [
         (('tambauzinho',), (-7.1180, -34.8420)),
@@ -1021,11 +1215,11 @@ def atualizar_localizacao_motoboy():
         """, (lat, lng, now_str, search_key, f"%{search_key}%"))
 
     if pedido_id:
-        rows = conn.execute("SELECT * FROM pedidos WHERE (id = ? OR id_externo = ?) AND status = 'em_rota'", (pedido_id, pedido_id)).fetchall()
+        rows = conn.execute("SELECT * FROM pedidos WHERE (id = ? OR id_externo = ?) AND status IN ('em_rota', 'despachado', 'alocado', 'pronto')", (pedido_id, pedido_id)).fetchall()
     elif search_key:
-        rows = conn.execute("SELECT * FROM pedidos WHERE (entregador_id = ? OR entregador_nome LIKE ?) AND status = 'em_rota'", (search_key, f"%{search_key}%")).fetchall()
+        rows = conn.execute("SELECT * FROM pedidos WHERE (entregador_id = ? OR entregador_nome LIKE ?) AND status IN ('em_rota', 'despachado', 'alocado', 'pronto')", (search_key, f"%{search_key}%")).fetchall()
     else:
-        rows = conn.execute("SELECT * FROM pedidos WHERE status = 'em_rota'").fetchall()
+        rows = conn.execute("SELECT * FROM pedidos WHERE status IN ('em_rota', 'despachado', 'alocado', 'pronto')").fetchall()
 
     alertas_disparados = []
 
@@ -1250,75 +1444,26 @@ def reset_entregadores_api():
     return jsonify({"status": "success", "message": "Frota de entregadores resetada com sucesso!"}), 200
 
 
-@app.route("/api/pedidos/reset", methods=["POST"])
-
+@app.route("/api/pedidos/reset", methods=["POST", "DELETE"])
 def reset_pedidos_api():
-    """Reseta todos os pedidos e popula com os 3 pedidos oficiais (0121, 0123, 0122)."""
+    """Zera 100% dos pedidos do banco de dados e reseta a frota de entregadores."""
+    if supabase:
+        try:
+            supabase.table("pedidos").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+        except Exception as e:
+            print(f"[AVISO] Falha ao resetar pedidos no Supabase: {e}")
+
     conn = get_db_connection()
     conn.execute("DELETE FROM pedidos")
     conn.execute("UPDATE entregadores SET frete_acumulado = 0.0, total_entregas = 0, status = 'disponivel'")
-
-    pedidos_iniciais = [
-        {
-            "id": str(uuid.uuid4()),
-            "origem": "ifood",
-            "id_externo": "0121",
-            "nome_cliente": "Luciana Souza",
-            "telefone_cliente": "83999112233",
-            "endereco_entrega": "Av. General Edson Ramalho, 800 - Manaíra, João Pessoa - PB",
-            "latitude": -7.0988,
-            "longitude": -34.8385,
-            "itens": json.dumps([{"nome": "Parmegiana de Carne Individual", "quantidade": 1, "preco_unitario": 55.90}]),
-            "valor_total": 57.02,
-            "status": "preparo",
-            "created_at": datetime.now().isoformat()
-        },
-        {
-            "id": str(uuid.uuid4()),
-            "origem": "ifood",
-            "id_externo": "0123",
-            "nome_cliente": "Fernando Silva",
-            "telefone_cliente": "83988776655",
-            "endereco_entrega": "Av. Senador Ruy Carneiro / R. Paulino Pinto - Tambaú, João Pessoa - PB",
-            "latitude": -7.1145,
-            "longitude": -34.8285,
-            "itens": json.dumps([{"nome": "Fettuccine Alfredo com Camarão", "quantidade": 1, "preco_unitario": 62.00}]),
-            "valor_total": 62.00,
-            "status": "em_rota",
-            "entregador_nome": "ANDERSON",
-            "motoboy_latitude": -7.1132,
-            "motoboy_longitude": -34.8305,
-            "created_at": datetime.now().isoformat()
-        },
-        {
-            "id": str(uuid.uuid4()),
-            "origem": "ifood",
-            "id_externo": "0122",
-            "nome_cliente": "Carlos Eduardo",
-            "telefone_cliente": "83977665544",
-            "endereco_entrega": "Av. João Cyrillo / Av. Cabo Branco, 2500 - Cabo Branco, João Pessoa - PB",
-            "latitude": -7.1350,
-            "longitude": -34.8235,
-            "itens": json.dumps([{"nome": "Polpettone Recheado com Mozzarella", "quantidade": 1, "preco_unitario": 48.00}]),
-            "valor_total": 48.00,
-            "status": "preparo",
-            "created_at": datetime.now().isoformat()
-        }
-    ]
-
-    for p in pedidos_iniciais:
-        conn.execute("""
-            INSERT INTO pedidos (id, origem, id_externo, nome_cliente, telefone_cliente, endereco_entrega, latitude, longitude, itens, valor_total, status, entregador_nome, motoboy_latitude, motoboy_longitude, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            p["id"], p["origem"], p["id_externo"], p["nome_cliente"], p["telefone_cliente"],
-            p["endereco_entrega"], p["latitude"], p["longitude"], p["itens"], p["valor_total"],
-            p["status"], p.get("entregador_nome"), p.get("motoboy_latitude"), p.get("motoboy_longitude"), p["created_at"]
-        ))
-
     conn.commit()
     conn.close()
-    return jsonify({"status": "success", "message": "Banco resetado com os pedidos 0121, 0123, 0122"}), 200
+
+    print("[RESET OK] Todos os pedidos foram zerados do banco de dados (0 pedidos em banco).")
+    return jsonify({
+        "status": "success",
+        "message": "Banco de dados zerado com sucesso! Nenhum pedido pré-carregado. Pronto para receber seus novos pedidos."
+    }), 200
 
 
 @app.route("/api/ai/roteirizar", methods=["POST"])
