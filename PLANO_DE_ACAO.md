@@ -113,7 +113,13 @@ Os cards de pedido possuem um botão dinâmico de status:
 
 ## 📜 4. Histórico Incremental de Atualizações (Log de Mudanças)
 
-### 🗓️ Versão 3.5.0 - 22/09/2026 (Atual)
+### 🗓️ Versão 3.5.1 - 22/09/2026 (Atual)
+* 🎯 **Ajuste Fino de Rota Google Maps (`Rua + Número Exato`)**:
+  - `getGoogleMapsUrl` agora formata o destino prioritariamente com a string de endereço limpa (`Rua + Número Exato + Bairro + João Pessoa - PB + CEP`).
+  - Resolve o problema onde coordenadas genéricas de bairro faziam o Google Maps apontar para um número distante (ex: número 129 em vez do número 336).
+  - O Google Maps agora abre exatamente no **número da casa do pedido (ex: 336)**!
+
+### 🗓️ Versão 3.5.0 - 22/09/2026
 * 🗺️ **Navegação do Motoboy Exclusiva no Google Maps**: Removido botão do Waze e unificado em um botão único destacado `🗺️ Abrir Rota no Google Maps`.
 * 🗺️ **Sanitização Inteligente de Endereço para GPS (`getGoogleMapsUrl`)**:
   - Se o pedido possuir coordenadas salvas (`latitude`, `longitude`), abre rota direta via coordenadas GPS (porta exata).

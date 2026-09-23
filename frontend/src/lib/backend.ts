@@ -9,27 +9,54 @@ export const getBackendUrl = (): string => {
 };
 
 export const getGoogleMapsUrl = (addressStr?: string | null, lat?: number | null, lng?: number | null): string => {
-  // 1. Se possuir coordenadas válidas, gera rota direta no Google Maps via coordenadas (porta exata)
-  if (lat && lng && Math.abs(lat) > 0 && Math.abs(lng) > 0) {
-    return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+  if (!addressStr || !addressStr.trim()) {
+    if (lat && lng && Math.abs(lat) > 0 && Math.abs(lng) > 0) {
+      return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+    }
+    return 'https://www.google.com/maps';
   }
 
-  if (!addressStr) return 'https://www.google.com/maps';
+  const raw = addressStr.trim();
+  const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+  const line1 = lines[0] || raw;
 
-  // 2. Limpa complementos ruidosos após o CEP (ex: ") Apto 101 Perto do McDonald's")
-  let clean = addressStr.trim();
+  // Extrai CEP (ex: 58050-690 ou (58050-690))
+  const cepMatch = raw.match(/(\(\d{5}-?\d{3}\)|\b\d{5}-?\d{3}\b)/);
+  const cep = cepMatch ? cepMatch[0].replace(/[()]/g, '').trim() : '';
 
-  // Procura CEP no formato (58045-020) ou 58045-020 e corta tudo que vier APÓS o CEP
-  const cepMatch = clean.match(/(\(\d{5}-?\d{3}\)|\b\d{5}-?\d{3}\b)/);
-  if (cepMatch && cepMatch.index !== undefined) {
-    const cutoffIndex = cepMatch.index + cepMatch[0].length;
-    clean = clean.substring(0, cutoffIndex).trim();
-  } else {
-    // Se não tiver CEP explícito, limpa termos de complemento conhecidos que confundem a busca do Google Maps
-    clean = clean
-      .replace(/\s*,?\s*(?:apto|apt|ap|bloco|bl|casa|próximo|proximo|perto|condomínio|condominio)\b.*$/i, '')
-      .trim();
+  // Extrai Bairro se presente em linha separada
+  let bairro = '';
+  if (lines.length > 1) {
+    const line2Clean = lines[1].replace(/(\(\d{5}-?\d{3}\)|\b\d{5}-?\d{3}\b)/g, '').trim();
+    const parts = line2Clean.split(/[,|-]/);
+    if (parts.length > 0 && parts[0].trim()) {
+      bairro = parts[0].trim();
+    }
   }
 
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(clean)}`;
+  // Remove ruídos e complementos da linha 1 ("Ao lado da...", "Apto 101", "Próximo ao...")
+  // Mantém estritamente o Nome da Rua e Número Exato (ex: "R. Cônego Francisco Lima, 336")
+  const cleanLine1 = line1
+    .replace(/\s*,?\s*(?:apto|apt|ap|bloco|bl|casa|próximo|proximo|perto|ao lado|condomínio|condominio)\b.*$/i, '')
+    .trim();
+
+  // Constrói a consulta limpa focada em Rua + Número Exato + Bairro + João Pessoa - PB + CEP
+  const queryParts: string[] = [cleanLine1];
+
+  if (bairro && !cleanLine1.toLowerCase().includes(bairro.toLowerCase())) {
+    queryParts.push(bairro);
+  }
+
+  if (!queryParts.some(p => p.toLowerCase().includes('joão pessoa') || p.toLowerCase().includes('joao pessoa'))) {
+    queryParts.push('João Pessoa - PB');
+  }
+
+  if (cep && !queryParts.some(p => p.includes(cep))) {
+    queryParts.push(`(${cep})`);
+  }
+
+  const cleanQuery = queryParts.join(', ');
+
+  // Abre em modo Directions oficial do Google Maps apontando para o número textual exato
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(cleanQuery)}`;
 };
