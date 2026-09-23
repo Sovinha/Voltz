@@ -27,7 +27,7 @@ import {
   Zap
 } from 'lucide-react';
 import { Pedido } from '@/lib/supabase';
-import { getBackendUrl } from '@/lib/backend';
+import { getBackendUrl, getGoogleMapsUrl } from '@/lib/backend';
 import { IFoodConfirmationModal } from '@/components/IFoodConfirmationModal';
 import { analyzeOrderItems } from '@/lib/beverageDetection';
 
@@ -954,28 +954,16 @@ export default function MotoboyAppPage() {
                     </div>
                   )}
 
-                  {/* BOTOES DE AÇÃO E NAVEGAÇÃO GPS */}
-                  <div className="grid grid-cols-2 gap-2 pt-1">
-                    {/* Waze */}
+                  {/* BOTÃO ÚNICO DE NAVEGAÇÃO GPS - EXCLUSIVO GOOGLE MAPS COM LIMPEZA DE CEP/COMPLEMENTO */}
+                  <div className="pt-1">
                     <a
-                      href={`https://waze.com/ul?q=${encodeURIComponent(pedido.endereco_entrega)}&navigate=yes`}
+                      href={getGoogleMapsUrl(pedido.endereco_entrega, pedido.latitude, pedido.longitude)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="py-2.5 px-3 bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 border border-sky-500/30 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition"
+                      className="w-full py-3 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs rounded-xl shadow-lg shadow-emerald-950/40 border border-emerald-400/30 flex items-center justify-center gap-2 transition-all hover:scale-[1.01] active:scale-98"
                     >
-                      <Navigation className="w-4 h-4 text-sky-400" />
-                      <span>Waze</span>
-                    </a>
-
-                    {/* Google Maps */}
-                    <a
-                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(pedido.endereco_entrega)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="py-2.5 px-3 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition"
-                    >
-                      <ExternalLink className="w-4 h-4 text-emerald-400" />
-                      <span>Google Maps</span>
+                      <ExternalLink className="w-4 h-4 text-emerald-100" />
+                      <span>🗺️ Abrir Rota no Google Maps</span>
                     </a>
                   </div>
 

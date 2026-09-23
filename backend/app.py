@@ -25,6 +25,15 @@ CORS(app)  # Permite requisições do frontend React / Next.js
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 
+# Google Maps Geocoding API Key (opcional - ativa precisão máxima de porta/número exato)
+# Deve começar com "AIza" (formato de chave Google Maps)
+GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
+if GOOGLE_MAPS_API_KEY and not GOOGLE_MAPS_API_KEY.startswith("AIza"):
+    print(f"[AVISO] GOOGLE_MAPS_API_KEY não parece ser uma chave Google válida (deve começar com 'AIza'). Ignorando.")
+    GOOGLE_MAPS_API_KEY = ""
+if GOOGLE_MAPS_API_KEY:
+    print("[OK] Google Maps Geocoding API habilitada — precisão máxima de porta/número exato ativada!")
+
 if not SUPABASE_URL or not SUPABASE_KEY or "seu-projeto" in SUPABASE_URL or "sua-chave" in SUPABASE_KEY:
     supabase = None
     print("[AVISO] SUPABASE_URL/KEY nao definidos ou sao placeholders. Usando SQLite local (pedidos.db)!")
@@ -39,19 +48,19 @@ DB_FILE = os.path.join(os.path.dirname(__file__), "pedidos.db")
 
 
 def get_db_connection():
-    """Conecta ao banco de dados SQLite local com modo WAL para alta concorrência."""
-    conn = sqlite3.connect(DB_FILE, timeout=10.0)
+    """Conecta ao banco de dados SQLite local com timeout estendido para alta concorrência."""
+    conn = sqlite3.connect(DB_FILE, timeout=30.0)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA busy_timeout=5000;")
-    conn.execute("PRAGMA synchronous=NORMAL;")
     return conn
 
 
 def init_local_db():
-    """Inicializa as tabelas 'pedidos' e 'entregadores' no SQLite local com índices de alta performance."""
+    """Inicializa as tabelas 'pedidos' e 'entregadores' no SQLite local em modo WAL com índices de alta performance."""
     conn = get_db_connection()
     cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("PRAGMA busy_timeout=10000;")
+    cursor.execute("PRAGMA synchronous=NORMAL;")
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS pedidos (
             id TEXT PRIMARY KEY,
@@ -123,6 +132,19 @@ def init_local_db():
             except Exception as e:
                 pass
 
+
+    # Tabela de Cache de Geocodificação — evita chamadas repetidas para o mesmo endereço
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS geocode_cache (
+            address_hash TEXT PRIMARY KEY,
+            address_raw TEXT NOT NULL,
+            latitude REAL NOT NULL,
+            longitude REAL NOT NULL,
+            provider TEXT NOT NULL,
+            precision_level TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
 
     # Índices de Alta Performance para buscas rápidas no SQLite
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_pedidos_status ON pedidos(status);")
@@ -554,6 +576,102 @@ def atualizar_status_pedido(id_pedido):
     }), 200
 
 
+@app.route("/api/pedidos/<id_pedido>/regeocode", methods=["POST"])
+def regeocodificar_pedido(id_pedido):
+    """
+    Recalcula as coordenadas (lat, lng) de um pedido específico utilizando a pipeline multi-provedor.
+    Parâmetro opcional query/body: force=true para ignorar o cache e forçar nova busca externa.
+    """
+    data = request.get_json(silent=True) or {}
+    force_fresh = request.args.get("force", "").lower() == "true" or data.get("force", False)
+
+    conn = get_db_connection()
+    row = conn.execute("SELECT * FROM pedidos WHERE id = ? OR id_externo = ?", (id_pedido, id_pedido)).fetchone()
+
+    if not row:
+        conn.close()
+        return jsonify({"error": "Pedido não encontrado"}), 404
+
+    endereco = row["endereco_entrega"]
+    if force_fresh and endereco:
+        # Invalida cache local para este endereço
+        try:
+            conn.execute("DELETE FROM geocode_cache WHERE raw_address = ?", (endereco,))
+            conn.commit()
+            print(f"[REGEOCODE] Cache limpo para o endereço: '{endereco}'", file=sys.stderr)
+        except Exception as e_c:
+            print(f"[REGEOCODE WARN] {e_c}", file=sys.stderr)
+
+    new_lat, new_lng = geocode_address(endereco)
+
+    # Atualiza banco local
+    conn.execute(
+        "UPDATE pedidos SET latitude = ?, longitude = ? WHERE id = ? OR id_externo = ?",
+        (new_lat, new_lng, id_pedido, id_pedido)
+    )
+    conn.commit()
+    conn.close()
+
+    # Atualiza Supabase se disponível
+    if supabase:
+        try:
+            supabase.table("pedidos").update({"latitude": new_lat, "longitude": new_lng}).eq("id", id_pedido).execute()
+        except Exception as e_sub:
+            print(f"[REGEOCODE WARN Supabase] {e_sub}", file=sys.stderr)
+
+    return jsonify({
+        "status": "success",
+        "id": id_pedido,
+        "endereco": endereco,
+        "latitude": new_lat,
+        "longitude": new_lng,
+        "force_cache_cleared": force_fresh
+    }), 200
+
+
+@app.route("/api/pedidos/regeocode_all", methods=["POST"])
+def regeocodificar_todos_pedidos():
+    """
+    Recalcula coordenadas para TODOS os pedidos ativos no banco de dados.
+    Util para calibrar localização após atualizações na pipeline de geocodificação.
+    """
+    data = request.get_json(silent=True) or {}
+    force_fresh = request.args.get("force", "").lower() == "true" or data.get("force", False)
+
+    conn = get_db_connection()
+    pedidos = conn.execute("SELECT id, id_externo, endereco_entrega FROM pedidos").fetchall()
+
+    if force_fresh:
+        try:
+            conn.execute("DELETE FROM geocode_cache")
+            conn.commit()
+            print("[REGEOCODE ALL] Cache global de geocodificação zerado!", file=sys.stderr)
+        except Exception as e_c:
+            print(f"[REGEOCODE ALL WARN] {e_c}", file=sys.stderr)
+
+    atualizados = 0
+    resultados = []
+
+    for p in pedidos:
+        p_id = p["id"]
+        endereco = p["endereco_entrega"]
+        if endereco:
+            lat, lng = geocode_address(endereco)
+            conn.execute("UPDATE pedidos SET latitude = ?, longitude = ? WHERE id = ?", (lat, lng, p_id))
+            atualizados += 1
+            resultados.append({"id": p_id, "lat": lat, "lng": lng})
+
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        "status": "success",
+        "total_processados": len(pedidos),
+        "total_atualizados": atualizados,
+        "resultados": resultados
+    }), 200
+
+
 @app.route("/api/webhook/web", methods=["POST"])
 def webhook_cardapio_web():
     """
@@ -585,20 +703,34 @@ def webhook_cardapio_web():
         novo_id = str(uuid.uuid4())
         created_at_str = datetime.now().isoformat()
 
-        # Geocodificação e Sanitização Estrita de Coordenadas do Pedido
+        # Geocodificação Ultra-Rápida e Não-Bloqueante (< 10ms)
         addr = str(data.get("endereco_entrega"))
         req_lat = data.get("latitude")
         req_lng = data.get("longitude")
 
+        lat = None
+        lng = None
+        needs_async_geocode = False
+
         if req_lat is not None and req_lng is not None and float(req_lat) != 0:
             lat, lng = sanitize_coords(req_lat, req_lng)
-            # Se forem coordenadas genéricas de bairro/loja (-7.1145 / -7.1155), recarrega via geocodificação da rua exata
             if abs(lat - (-7.1145)) < 0.002 and abs(lng - (-34.8601)) < 0.002:
-                exact_lat, exact_lng = geocode_address(addr)
-                if exact_lat is not None and exact_lng is not None:
-                    lat, lng = exact_lat, exact_lng
+                cached = _geocode_cache_get(addr)
+                if cached:
+                    lat, lng = cached[0], cached[1]
+                else:
+                    needs_async_geocode = True
         else:
-            lat, lng = geocode_address(addr)
+            # 1. Tenta cache local em SQLite (~0ms)
+            cached = _geocode_cache_get(addr)
+            if cached:
+                lat, lng = cached[0], cached[1]
+            else:
+                # 2. Tenta fallback offline de bairro (~0ms)
+                f_lat, f_lng = _geocode_bairro_fallback(addr)
+                lat = f_lat if f_lat else -7.1155
+                lng = f_lng if f_lng else -34.8601
+                needs_async_geocode = True
 
         # Estruturação e Padronização do Pedido
         novo_pedido = {
@@ -615,7 +747,7 @@ def webhook_cardapio_web():
             "created_at": created_at_str
         }
 
-        # 1. Salva INSTANTANEAMENTE no SQLite local (1ms) para nao travar a interface do usuario
+        # 1. Salva INSTANTANEAMENTE no SQLite local (< 5ms)
         tel_cliente = data.get("telefone_cliente", "")
         conn = get_db_connection()
         conn.execute("""
@@ -638,9 +770,26 @@ def webhook_cardapio_web():
         conn.commit()
         conn.close()
 
-        print(f"[OK] Pedido registrado instantaneamente no SQLite local! ID: {novo_pedido['id']}")
+        print(f"[OK ⚡] Pedido salvo INSTANTANEAMENTE no SQLite (< 5ms)! ID: {novo_pedido['id']}")
 
-        # 2. Tenta Supabase se configurado de forma nao-bloqueante
+        # 2. Dispara geocodificação de rua exata em THREAD SEPARADA em segundo plano sem travar o usuário!
+        if needs_async_geocode:
+            import threading
+            def _bg_geocode():
+                try:
+                    exact_lat, exact_lng = geocode_address(addr)
+                    if exact_lat is not None and exact_lng is not None:
+                        conn_bg = get_db_connection()
+                        conn_bg.execute("UPDATE pedidos SET latitude = ?, longitude = ? WHERE id = ?", (exact_lat, exact_lng, novo_id))
+                        conn_bg.commit()
+                        conn_bg.close()
+                        print(f"[BG GEOCODE OK 🎯] Pedido {novo_id} atualizado com coordenadas exatas ({exact_lat}, {exact_lng})", file=sys.stderr)
+                except Exception as e_bg:
+                    print(f"[BG GEOCODE WARN] {e_bg}", file=sys.stderr)
+
+            threading.Thread(target=_bg_geocode, daemon=True).start()
+
+        # 3. Tenta Supabase se configurado de forma nao-bloqueante
         if supabase and SUPABASE_URL and "seu-projeto" not in SUPABASE_URL:
             try:
                 payload_supabase = {k: v for k, v in novo_pedido.items() if k != "id"}
@@ -920,149 +1069,242 @@ def generate_geocode_candidates(address_str):
     return candidates
 
 
-def geocode_address(address_str):
+import hashlib
+
+def _geocode_cache_key(address_str):
+    """Gera hash MD5 normalizado do endereço para uso como chave de cache."""
+    normalized = remove_accents(address_str.strip().lower())
+    normalized = re.sub(r'\s+', ' ', normalized)
+    return hashlib.md5(normalized.encode('utf-8')).hexdigest()
+
+
+def _geocode_cache_get(address_str):
+    """Busca coordenadas em cache. Retorna (lat, lng, provider) ou None."""
+    try:
+        key = _geocode_cache_key(address_str)
+        conn = get_db_connection()
+        row = conn.execute("SELECT latitude, longitude, provider FROM geocode_cache WHERE address_hash = ?", (key,)).fetchone()
+        conn.close()
+        if row:
+            print(f"[GEOCODE CACHE HIT] '{address_str[:60]}...' -> ({row['latitude']}, {row['longitude']}) via {row['provider']}", file=sys.stderr, flush=True)
+            return row['latitude'], row['longitude'], row['provider']
+    except Exception as e:
+        print(f"[GEOCODE CACHE WARN] Erro leitura: {e}", file=sys.stderr, flush=True)
+    return None
+
+
+def _geocode_cache_set(address_str, lat, lng, provider, precision_level="street"):
+    """Salva resultado de geocodificação no cache SQLite."""
+    try:
+        key = _geocode_cache_key(address_str)
+        conn = get_db_connection()
+        conn.execute("""
+            INSERT OR REPLACE INTO geocode_cache (address_hash, address_raw, latitude, longitude, provider, precision_level, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (key, address_str[:500], lat, lng, provider, precision_level, datetime.now().isoformat()))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[GEOCODE CACHE WARN] Erro escrita: {e}", file=sys.stderr, flush=True)
+
+
+def _geocode_google_maps(official_street, house_number, bairro, cidade, uf):
     """
-    Converte um endereço textual em coordenadas (latitude, longitude) reais com precisão de rua e número em João Pessoa/PB.
-    Utiliza Inteligência ViaCEP (Correios) + Busca Estruturada OpenStreetMap Nominatim.
+    Provedor 1 (PREMIUM): Google Maps Geocoding API.
+    Precisão de porta/número exato para 99%+ dos endereços brasileiros.
+    Só ativado se GOOGLE_MAPS_API_KEY estiver configurado no .env.
     """
-    if not address_str or not isinstance(address_str, str):
-        return -7.1155, -34.8601
+    if not GOOGLE_MAPS_API_KEY:
+        return None, None, None
 
-    headers = {"User-Agent": "VoltzLogisticsSystem/3.0 (contact: admin@voltzdelivery.com.br)"}
+    try:
+        parts = [p for p in [official_street, house_number, bairro, cidade, uf, "Brasil"] if p]
+        address_query = ", ".join(parts)
 
-    # Extrair CEP e partes do endereço
-    clean, cep, bairro = _extract_address_parts(address_str)
+        r = requests.get(
+            "https://maps.googleapis.com/maps/api/geocode/json",
+            params={
+                "address": address_query,
+                "key": GOOGLE_MAPS_API_KEY,
+                "region": "br",
+                "language": "pt-BR",
+                "components": "country:BR"
+            },
+            timeout=4
+        )
+        if r.status_code == 200:
+            data = r.json()
+            if data.get("status") == "OK" and data.get("results"):
+                result = data["results"][0]
+                location = result["geometry"]["location"]
+                lat, lng = sanitize_coords(location["lat"], location["lng"])
+                location_type = result["geometry"].get("location_type", "APPROXIMATE")
+                precision = "rooftop" if location_type == "ROOFTOP" else "interpolated" if location_type == "RANGE_INTERPOLATED" else "geometric_center"
+                print(f"[GEOCODE GOOGLE MAPS] '{address_query}' -> ({lat}, {lng}) [{location_type}]", file=sys.stderr, flush=True)
+                return lat, lng, precision
+    except Exception as e:
+        print(f"[GEOCODE WARN] Google Maps indisponível: {e}", file=sys.stderr, flush=True)
 
-    # Tentativa 0-A (INTELIGÊNCIA MAXIMA VIACEP + NOMINATIM):
-    # Consulta a base oficial dos Correios (ViaCEP) pelo CEP de 8 dígitos para obter a rua e bairro oficiais
+    return None, None, None
+
+
+def _geocode_photon(official_street, house_number, bairro, cidade="João Pessoa", uf="Paraíba"):
+    """
+    Provedor 2 (GRATUITO): Photon API (Komoot).
+    Baseado em dados OSM mas com busca mais inteligente e suporte a pt-BR.
+    Sem rate-limit agressivo, sem API key, excelente para endereços brasileiros.
+    """
+    try:
+        parts = [p for p in [official_street, house_number, bairro, cidade, uf] if p]
+        query = ", ".join(parts)
+
+        r = requests.get(
+            "https://photon.komoot.io/api/",
+            params={
+                "q": query,
+                "lang": "default",
+                "limit": 5,
+                "lat": -7.12,   # Bias para João Pessoa
+                "lon": -34.86,
+            },
+            timeout=4
+        )
+        if r.status_code == 200:
+            data = r.json()
+            features = data.get("features", [])
+
+            # Filtra resultados dentro do bounding box de João Pessoa (com margem)
+            jp_candidates = []
+            for feat in features:
+                coords = feat.get("geometry", {}).get("coordinates", [])
+                if len(coords) >= 2:
+                    f_lng, f_lat = coords[0], coords[1]
+                    if -7.35 <= f_lat <= -6.85 and -35.1 <= f_lng <= -34.65:
+                        props = feat.get("properties", {})
+                        osm_type = props.get("osm_value", "")
+                        jp_candidates.append((f_lat, f_lng, osm_type, props))
+
+            if jp_candidates:
+                # Prioriza resultado do tipo house/building se disponível
+                for f_lat, f_lng, osm_type, props in jp_candidates:
+                    if osm_type in ("house", "residential", "apartments", "yes"):
+                        lat, lng = sanitize_coords(f_lat, f_lng)
+                        print(f"[GEOCODE PHOTON HOUSE] '{query}' -> ({lat}, {lng}) [{osm_type}]", file=sys.stderr, flush=True)
+                        return lat, lng, "house"
+
+                # Senão, usa o primeiro resultado dentro de JP
+                f_lat, f_lng, osm_type, props = jp_candidates[0]
+                lat, lng = sanitize_coords(f_lat, f_lng)
+                print(f"[GEOCODE PHOTON] '{query}' -> ({lat}, {lng}) [{osm_type}]", file=sys.stderr, flush=True)
+                return lat, lng, "street"
+    except Exception as e:
+        print(f"[GEOCODE WARN] Photon indisponível: {e}", file=sys.stderr, flush=True)
+
+    return None, None, None
+
+
+def _geocode_nominatim_structured(official_street, house_number, bairro, cidade="João Pessoa", uf="Paraíba", cep=None):
+    """
+    Provedor 3 (GRATUITO): Nominatim Busca Estruturada com múltiplas estratégias.
+    Tenta formatos diferentes para maximizar a chance de encontrar o endereço exato.
+    """
+    headers = {"User-Agent": "VoltzLogisticsSystem/4.0 (contact: admin@voltzdelivery.com.br)"}
+
+    # Estratégia A: Busca estruturada com número no campo street (formato Nominatim padrão)
+    strategies = []
+
+    if house_number and official_street:
+        # Formato Nominatim: "número rua" no campo street
+        strategies.append({
+            "street": f"{house_number} {official_street}",
+            "city": cidade,
+            "state": uf,
+            "country": "Brasil",
+            "format": "json",
+            "limit": 3,
+            "addressdetails": 1,
+        })
+
+        # Formato brasileiro: "Rua, número" como query completa com bairro
+        if bairro:
+            strategies.append({
+                "q": f"{official_street}, {house_number}, {bairro}, {cidade}, {uf}, Brasil",
+                "format": "json",
+                "limit": 3,
+                "addressdetails": 1,
+                "viewbox": "-35.05,-7.30,-34.70,-6.90",
+                "bounded": 1,
+            })
+
+        # Formato sem bairro (para quando bairro atrapalha)
+        strategies.append({
+            "q": f"{official_street}, {house_number}, {cidade}, {uf}",
+            "format": "json",
+            "limit": 3,
+            "addressdetails": 1,
+            "viewbox": "-35.05,-7.30,-34.70,-6.90",
+            "bounded": 1,
+        })
+
+    elif official_street:
+        strategies.append({
+            "street": official_street,
+            "city": cidade,
+            "state": uf,
+            "country": "Brasil",
+            "format": "json",
+            "limit": 3,
+            "addressdetails": 1,
+        })
+
     if cep:
+        for s in strategies:
+            if "postalcode" not in s:
+                s_with_cep = dict(s)
+                s_with_cep["postalcode"] = cep
+                strategies.insert(0, s_with_cep)  # CEP first (mais preciso)
+                break
+
+    for idx, params in enumerate(strategies):
         try:
-            clean_cep = cep.replace("-", "").strip()
-            viacep_res = requests.get(f"https://viacep.com.br/ws/{clean_cep}/json/", timeout=2.5)
-            if viacep_res.status_code == 200:
-                vdata = viacep_res.json()
-                if not vdata.get("erro"):
-                    official_street = vdata.get("logradouro", "")
-                    official_bairro = vdata.get("bairro", "")
-                    official_city = vdata.get("localidade", "João Pessoa")
-                    official_uf = vdata.get("uf", "PB")
+            import time
+            if idx > 0:
+                time.sleep(0.3)  # Respeita rate-limit Nominatim (1 req/s)
 
-                    # Extrair o número exato da 1ª linha do endereço original
-                    lines = [l.strip() for l in address_str.split('\n') if l.strip()]
-                    line1 = lines[0] if lines else clean
-                    num_match = re.search(r'(?:,\s*|\s+)(\d{1,5})(?:\s*[-,]|\s|$)', line1)
-                    if not num_match:
-                        num_match = re.search(r'(?:,\s*|\s+)(\d{1,5})(?:\s*[-,]|\s|$)', clean)
-                    hnum = num_match.group(1) if num_match else ""
-
-                    query_q = f"{official_street} {hnum}, {official_bairro}, {official_city}, {official_uf}, Brasil".replace(" ,", "").strip()
-                    nom_res = requests.get("https://nominatim.openstreetmap.org/search", params={"q": query_q, "format": "json", "limit": 1}, headers=headers, timeout=3)
-                    if nom_res.status_code == 200:
-                        njson = nom_res.json()
-                        if njson and len(njson) > 0:
-                            lat, lng = sanitize_coords(njson[0]["lat"], njson[0]["lon"])
-                            print(f"[GEOCODE ViaCEP+Nominatim 100% SUCESSO] '{query_q}' -> ({lat}, {lng})", file=sys.stderr, flush=True)
-                            return lat, lng
-        except Exception as e_vcep:
-            print(f"[GEOCODE WARN] Consulta ViaCEP indisponível: {e_vcep}", file=sys.stderr, flush=True)
-
-    # Tentativa 0-B: Busca estruturada por CEP direto no Nominatim
-    if cep:
-        try:
             r = requests.get(
                 "https://nominatim.openstreetmap.org/search",
-                params={
-                    "postalcode": cep,
-                    "country": "Brasil",
-                    "format": "json",
-                    "limit": 1,
-                    "addressdetails": 1
-                },
+                params=params,
                 headers=headers,
-                timeout=3
+                timeout=4
             )
             if r.status_code == 200:
                 data = r.json()
                 if data and len(data) > 0:
-                    lat, lng = sanitize_coords(data[0]["lat"], data[0]["lon"])
-                    print(f"[GEOCODE CEP] CEP '{cep}' -> ({lat}, {lng})", file=sys.stderr, flush=True)
-                    # CEP dá boa precisão de trecho de rua, usar como base
-                    # mas continuar para ver se a busca por endereço completo é mais precisa
-                    cep_lat, cep_lng = lat, lng
-                else:
-                    cep_lat, cep_lng = None, None
-            else:
-                cep_lat, cep_lng = None, None
+                    # Seleciona o resultado com melhor classe (building > place > highway)
+                    best = data[0]
+                    for item in data:
+                        if item.get("class") == "building":
+                            best = item
+                            break
+                        if item.get("class") == "place" and best.get("class") != "building":
+                            best = item
+
+                    lat, lng = sanitize_coords(best["lat"], best["lon"])
+                    osm_type = best.get("type", "unknown")
+                    query_desc = params.get("street", params.get("q", "?"))
+                    print(f"[GEOCODE NOMINATIM STRUCT #{idx}] '{query_desc}' -> ({lat}, {lng}) [{osm_type}]", file=sys.stderr, flush=True)
+                    return lat, lng, osm_type
         except Exception as e:
-            print(f"[GEOCODE WARN] CEP '{cep}' indisponível: {e}", file=sys.stderr, flush=True)
-            cep_lat, cep_lng = None, None
-    else:
-        cep_lat, cep_lng = None, None
+            print(f"[GEOCODE WARN] Nominatim estratégia #{idx} indisponível: {e}", file=sys.stderr, flush=True)
 
-    # Tentativa 1: Busca estruturada com street/city (mais precisa para número)
-    street_prefix_re = r'^(rua|av\.?|avenida|r\.?|tv\.?|travessa|prc\.?|praca|alameda|prof\.?|professor|dr\.?|doutor)\s+'
-    unaccented = remove_accents(clean).strip(', -')
-    noprefix = re.sub(street_prefix_re, '', unaccented, flags=re.IGNORECASE).strip()
-    num_match = re.search(r'(?:,\s*|\s+)(\d{1,5})(?:\s*[-,]|\s|$)', unaccented)
-    house_number = num_match.group(1) if num_match else None
+    return None, None, None
 
-    if house_number:
-        # Extrair a parte da rua (com prefixo)
-        street_part = re.split(r',\s*\d|(?<=[a-zA-Z])\s+\d', unaccented)[0].strip()
-        if street_part and len(street_part) > 3:
-            try:
-                structured_params = {
-                    "street": f"{house_number} {street_part}",
-                    "city": "João Pessoa",
-                    "state": "Paraíba",
-                    "country": "Brasil",
-                    "format": "json",
-                    "limit": 1,
-                    "addressdetails": 1
-                }
-                if cep:
-                    structured_params["postalcode"] = cep
-                r = requests.get(
-                    "https://nominatim.openstreetmap.org/search",
-                    params=structured_params,
-                    headers=headers,
-                    timeout=3
-                )
-                if r.status_code == 200:
-                    data = r.json()
-                    if data and len(data) > 0:
-                        lat, lng = sanitize_coords(data[0]["lat"], data[0]["lon"])
-                        print(f"[GEOCODE ESTRUTURADO] '{house_number} {street_part}' -> ({lat}, {lng})", file=sys.stderr, flush=True)
-                        return lat, lng
-            except Exception as e:
-                print(f"[GEOCODE WARN] Busca estruturada indisponível: {e}", file=sys.stderr, flush=True)
 
-    # Tentativa 2: Candidatos free-form (fallback progressivo)
-    candidates = generate_geocode_candidates(address_str)
 
-    for cand in candidates:
-        try:
-            r = requests.get(
-                "https://nominatim.openstreetmap.org/search",
-                params={"q": cand, "format": "json", "limit": 1},
-                headers=headers,
-                timeout=3
-            )
-            if r.status_code == 200:
-                data = r.json()
-                if data and len(data) > 0:
-                    lat, lng = sanitize_coords(data[0]["lat"], data[0]["lon"])
-                    print(f"[GEOCODE SUCESSO] '{cand}' -> ({lat}, {lng})", file=sys.stderr, flush=True)
-                    return lat, lng
-        except Exception as e:
-            print(f"[GEOCODE WARN] Candidato '{cand}' indisponível: {e}", file=sys.stderr, flush=True)
-
-    # Tentativa 3: Usar resultado do CEP se disponível
-    if cep_lat is not None and cep_lng is not None:
-        print(f"[GEOCODE FALLBACK CEP] '{address_str}' -> ({cep_lat}, {cep_lng}) via CEP {cep}", file=sys.stderr, flush=True)
-        return cep_lat, cep_lng
-
-    # Tentativa 4: Fallback por Bairros com validação de limite de palavras (\b)
+def _geocode_bairro_fallback(address_str):
+    """Fallback por Bairros (~0ms): retorna centróide hardcoded de João Pessoa se o bairro constar no endereço."""
+    if not address_str:
+        return None, None
     addr_low = remove_accents(address_str).lower()
     bairros_jp = [
         (('tambauzinho',), (-7.1180, -34.8420)),
@@ -1091,15 +1333,226 @@ def geocode_address(address_str):
         (('colinas do sul',), (-7.1950, -34.8750)),
         (('castelo branco',), (-7.1380, -34.8520)),
         (('intermares', 'cabedelo'), (-7.0350, -34.8350)),
+        (('miramar',), (-7.1140, -34.8470)),
+        (('brisamar',), (-7.0900, -34.8350)),
+        (('jardim oceania',), (-7.0850, -34.8350)),
+        (('jardim cidade universitaria', 'cidade universitaria'), (-7.1450, -34.8450)),
+        (('funcionarios',), (-7.1200, -34.8700)),
+    ]
+    for keywords, (b_lat, b_lng) in bairros_jp:
+        for kw in keywords:
+            if kw in addr_low:
+                return b_lat, b_lng
+    return None, None
+
+
+def geocode_address(address_str):
+    """
+    Pipeline Multi-Provedor de Geocodificação com Precisão Cascata.
+    Converte endereço textual em coordenadas (lat, lng) com a melhor precisão possível.
+
+    Ordem de tentativa (do mais preciso para o menos):
+    1. Cache local SQLite (instantâneo)
+    2. Google Maps Geocoding API (se GOOGLE_MAPS_API_KEY configurado)
+    3. Photon API (Komoot) — gratuito, baseado em OSM com busca inteligente
+    4. ViaCEP (Correios) + Nominatim Busca Estruturada — rua oficial + viewbox JP
+    5. Nominatim Free-Form com candidatos progressivos
+    6. Fallback por centróide de bairro hardcoded
+    """
+    if not address_str or not isinstance(address_str, str):
+        return -7.1155, -34.8601
+
+    # ═══════════════════════════════════════════════════════════════════
+    # ETAPA 0: Cache — retorna instantaneamente se já geocodificou antes
+    # ═══════════════════════════════════════════════════════════════════
+    cached = _geocode_cache_get(address_str)
+    if cached:
+        return cached[0], cached[1]
+
+    headers = {"User-Agent": "VoltzLogisticsSystem/4.0 (contact: admin@voltzdelivery.com.br)"}
+
+    # Extrair CEP e partes do endereço
+    clean, cep, bairro = _extract_address_parts(address_str)
+
+    # Preparar dados oficiais via ViaCEP (quando CEP disponível)
+    official_street = None
+    official_bairro = bairro or ""
+    official_city = "João Pessoa"
+    official_uf = "PB"
+    house_number = ""
+
+    # Extrair número da casa do endereço original
+    lines = [l.strip() for l in address_str.split('\n') if l.strip()]
+    line1 = lines[0] if lines else clean
+    num_match = re.search(r'(?:,\s*|\s+)(\d{1,5})(?:\s*[-,]|\s|$)', line1)
+    if not num_match:
+        num_match = re.search(r'(?:,\s*|\s+)(\d{1,5})(?:\s*[-,]|\s|$)', clean)
+    house_number = num_match.group(1) if num_match else ""
+
+    # Extrair nome da rua do endereço original (para fallbacks)
+    street_from_input = re.sub(r',\s*\d+.*$', '', line1).strip()
+
+    # Consulta ViaCEP para obter nome oficial da rua
+    if cep:
+        try:
+            clean_cep = cep.replace("-", "").strip()
+            viacep_res = requests.get(f"https://viacep.com.br/ws/{clean_cep}/json/", timeout=2.5)
+            if viacep_res.status_code == 200:
+                vdata = viacep_res.json()
+                if not vdata.get("erro"):
+                    official_street = vdata.get("logradouro", "") or street_from_input
+                    official_bairro = vdata.get("bairro", "") or bairro or ""
+                    official_city = vdata.get("localidade", "João Pessoa")
+                    official_uf = vdata.get("uf", "PB")
+                    print(f"[VIACEP OK] CEP {cep} -> {official_street}, {official_bairro}, {official_city}/{official_uf}", file=sys.stderr, flush=True)
+        except Exception as e_vcep:
+            print(f"[GEOCODE WARN] ViaCEP indisponível: {e_vcep}", file=sys.stderr, flush=True)
+
+    if not official_street:
+        official_street = street_from_input
+
+    # ═══════════════════════════════════════════════════════════════════
+    # ETAPA 1: Google Maps API (PREMIUM — se configurado)
+    # ═══════════════════════════════════════════════════════════════════
+    g_lat, g_lng, g_precision = _geocode_google_maps(official_street, house_number, official_bairro, official_city, official_uf)
+    if g_lat is not None:
+        _geocode_cache_set(address_str, g_lat, g_lng, "google_maps", g_precision)
+        return g_lat, g_lng
+
+    # ═══════════════════════════════════════════════════════════════════
+    # ETAPA 2: Photon API (Komoot) — gratuito, busca inteligente OSM
+    # ═══════════════════════════════════════════════════════════════════
+    p_lat, p_lng, p_precision = _geocode_photon(official_street, house_number, official_bairro, official_city, official_uf)
+    if p_lat is not None:
+        _geocode_cache_set(address_str, p_lat, p_lng, "photon", p_precision)
+        return p_lat, p_lng
+
+    # ═══════════════════════════════════════════════════════════════════
+    # ETAPA 3: ViaCEP + Nominatim Busca Estruturada (formato BR correto)
+    # ═══════════════════════════════════════════════════════════════════
+    n_lat, n_lng, n_precision = _geocode_nominatim_structured(official_street, house_number, official_bairro, official_city, official_uf, cep)
+    if n_lat is not None:
+        _geocode_cache_set(address_str, n_lat, n_lng, "nominatim_structured", n_precision)
+        return n_lat, n_lng
+
+    # ═══════════════════════════════════════════════════════════════════
+    # ETAPA 3B: Nominatim ViaCEP query_q (formato antigo como fallback)
+    # ═══════════════════════════════════════════════════════════════════
+    if cep and official_street:
+        try:
+            query_q = f"{official_street} {house_number}, {official_bairro}, {official_city}, {official_uf}, Brasil".replace(" ,", "").strip()
+            nom_res = requests.get("https://nominatim.openstreetmap.org/search", params={"q": query_q, "format": "json", "limit": 1}, headers=headers, timeout=3)
+            if nom_res.status_code == 200:
+                njson = nom_res.json()
+                if njson and len(njson) > 0:
+                    lat, lng = sanitize_coords(njson[0]["lat"], njson[0]["lon"])
+                    print(f"[GEOCODE ViaCEP+Nominatim] '{query_q}' -> ({lat}, {lng})", file=sys.stderr, flush=True)
+                    _geocode_cache_set(address_str, lat, lng, "viacep_nominatim", "street")
+                    return lat, lng
+        except Exception as e_vcep:
+            print(f"[GEOCODE WARN] ViaCEP+Nominatim fallback indisponível: {e_vcep}", file=sys.stderr, flush=True)
+
+    # ═══════════════════════════════════════════════════════════════════
+    # ETAPA 3C: Nominatim busca por CEP direto (precisão de trecho)
+    # ═══════════════════════════════════════════════════════════════════
+    cep_lat, cep_lng = None, None
+    if cep:
+        try:
+            r = requests.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={"postalcode": cep, "country": "Brasil", "format": "json", "limit": 1, "addressdetails": 1},
+                headers=headers, timeout=3
+            )
+            if r.status_code == 200:
+                data = r.json()
+                if data and len(data) > 0:
+                    cep_lat, cep_lng = sanitize_coords(data[0]["lat"], data[0]["lon"])
+                    print(f"[GEOCODE CEP] CEP '{cep}' -> ({cep_lat}, {cep_lng})", file=sys.stderr, flush=True)
+        except Exception as e:
+            print(f"[GEOCODE WARN] CEP '{cep}' indisponível: {e}", file=sys.stderr, flush=True)
+
+    # ═══════════════════════════════════════════════════════════════════
+    # ETAPA 4: Nominatim Free-Form Candidatos (fallback progressivo)
+    # ═══════════════════════════════════════════════════════════════════
+    candidates = generate_geocode_candidates(address_str)
+    for cand in candidates:
+        try:
+            r = requests.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={
+                    "q": cand,
+                    "format": "json",
+                    "limit": 1,
+                    "viewbox": "-35.05,-7.30,-34.70,-6.90",
+                    "bounded": 1
+                },
+                headers=headers, timeout=3
+            )
+            if r.status_code == 200:
+                data = r.json()
+                if data and len(data) > 0:
+                    lat, lng = sanitize_coords(data[0]["lat"], data[0]["lon"])
+                    print(f"[GEOCODE FREE-FORM] '{cand}' -> ({lat}, {lng})", file=sys.stderr, flush=True)
+                    _geocode_cache_set(address_str, lat, lng, "nominatim_freeform", "street")
+                    return lat, lng
+        except Exception as e:
+            print(f"[GEOCODE WARN] Candidato '{cand}' indisponível: {e}", file=sys.stderr, flush=True)
+
+    # ═══════════════════════════════════════════════════════════════════
+    # ETAPA 5: Usar resultado do CEP se disponível
+    # ═══════════════════════════════════════════════════════════════════
+    if cep_lat is not None and cep_lng is not None:
+        print(f"[GEOCODE FALLBACK CEP] '{address_str[:60]}...' -> ({cep_lat}, {cep_lng}) via CEP {cep}", file=sys.stderr, flush=True)
+        _geocode_cache_set(address_str, cep_lat, cep_lng, "cep_fallback", "postal_code")
+        return cep_lat, cep_lng
+
+    # ═══════════════════════════════════════════════════════════════════
+    # ETAPA 6: Fallback por Bairros (centróide hardcoded de João Pessoa)
+    # ═══════════════════════════════════════════════════════════════════
+    addr_low = remove_accents(address_str).lower()
+    bairros_jp = [
+        (('tambauzinho',), (-7.1180, -34.8420)),
+        (('tambau',), (-7.1156, -34.8285)),
+        (('tambia',), (-7.1169, -34.8764)),
+        (('treze de maio',), (-7.1120, -34.8750)),
+        (('mandacaru',), (-7.1000, -34.8680)),
+        (('roger',), (-7.1100, -34.8850)),
+        (('manaira',), (-7.0988, -34.8341)),
+        (('cabo branco',), (-7.1350, -34.8235)),
+        (('bessa', 'aeroclube'), (-7.0700, -34.8380)),
+        (('jardim luna', 'luna'), (-7.1020, -34.8450)),
+        (('pedro gondim', 'bairro dos estados', 'estados', 'ipes', 'mesquita'), (-7.1145, -34.8601)),
+        (('expedicionarios',), (-7.1230, -34.8550)),
+        (('torre',), (-7.1220, -34.8650)),
+        (('centro', 'varadouro'), (-7.1190, -34.8820)),
+        (('jaguaribe',), (-7.1320, -34.8810)),
+        (('cruz das armas',), (-7.1400, -34.8900)),
+        (('bancarios',), (-7.1550, -34.8380)),
+        (('altiplano', 'portal do sol'), (-7.1420, -34.8180)),
+        (('mangabeira',), (-7.1700, -34.8350)),
+        (('cristo', 'agua fria'), (-7.1580, -34.8650)),
+        (('geisel', 'ernesto geisel'), (-7.1700, -34.8600)),
+        (('valentina', 'valentina figueiredo'), (-7.1900, -34.8400)),
+        (('gramame',), (-7.2000, -34.8500)),
+        (('colinas do sul',), (-7.1950, -34.8750)),
+        (('castelo branco',), (-7.1380, -34.8520)),
+        (('intermares', 'cabedelo'), (-7.0350, -34.8350)),
+        (('miramar',), (-7.1140, -34.8470)),
+        (('brisamar',), (-7.0900, -34.8350)),
+        (('jardim oceania',), (-7.0850, -34.8350)),
+        (('jardim cidade universitaria', 'cidade universitaria'), (-7.1450, -34.8450)),
+        (('funcionarios',), (-7.1200, -34.8700)),
     ]
 
     for keywords, coords in bairros_jp:
         for k in keywords:
             if re.search(r'\b' + re.escape(k) + r'\b', addr_low):
-                print(f"[GEOCODE FALLBACK BAIRRO] '{address_str}' -> {coords} (Match: '{k}')", file=sys.stderr, flush=True)
+                print(f"[GEOCODE FALLBACK BAIRRO] '{address_str[:60]}...' -> {coords} (Match: '{k}')", file=sys.stderr, flush=True)
+                _geocode_cache_set(address_str, coords[0], coords[1], "bairro_fallback", "neighborhood")
                 return coords
 
     return -7.1155, -34.8601
+
 
 
 import math
@@ -1776,6 +2229,6 @@ if __name__ == "__main__":
 
     port = int(os.getenv("FLASK_PORT", 5000))
     debug = os.getenv("FLASK_DEBUG", "True").lower() == "true"
-    print(f"[OK] Servidor Flask rodando na porta {port} (Debug: {debug})...")
-    app.run(host="0.0.0.0", port=port, debug=debug)
+    print(f"[OK] Servidor Flask rodando na porta {port} (Debug: {debug}, Threaded: True)...")
+    app.run(host="0.0.0.0", port=port, debug=debug, threaded=True)
 

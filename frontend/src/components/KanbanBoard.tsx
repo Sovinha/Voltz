@@ -108,7 +108,11 @@ export const KanbanBoard: React.FC = () => {
 
   // Busca inicial e periódica dos pedidos
   const fetchPedidos = useCallback(async () => {
-    setLoading(true);
+    // Só ativa spinner na carga inicial em tela vazia para manter transição instantânea
+    setPedidos((prev) => {
+      if (prev.length === 0) setLoading(true);
+      return prev;
+    });
 
     const getLocalOrders = (): Pedido[] => {
       try {
