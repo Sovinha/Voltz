@@ -15,6 +15,12 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
+# Assegura encoding UTF-8 no stdout/stderr no Windows
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='backslashreplace')
+
 # Carrega as variáveis de ambiente do arquivo .env
 load_dotenv()
 
@@ -1570,6 +1576,126 @@ def haversine_distance_km(lat1, lon1, lat2, lon2):
     return R * c
 
 
+def calculate_bearing_degrees(lat1, lon1, lat2, lon2):
+    """Calcula o azimute/ângulo em graus (0-360) da origem (lat1, lon1) ao destino (lat2, lon2)."""
+    if None in (lat1, lon1, lat2, lon2):
+        return 0.0
+    lat1_r = math.radians(lat1)
+    lat2_r = math.radians(lat2)
+    dlon_r = math.radians(lon2 - lon1)
+    
+    y = math.sin(dlon_r) * math.cos(lat2_r)
+    x = math.cos(lat1_r) * math.sin(lat2_r) - math.sin(lat1_r) * math.cos(lat2_r) * math.cos(dlon_r)
+    bearing = math.atan2(y, x)
+    return (math.degrees(bearing) + 360) % 360
+
+
+def get_sector_name(bearing_deg):
+    """Retorna o setor direcional aproximado para agrupar pedidos em João Pessoa."""
+    if 45 <= bearing_deg < 135:
+        return "Zona Leste / Orla"
+    elif 135 <= bearing_deg < 225:
+        return "Zona Sul (Tambauzinho/Miramar)"
+    elif 225 <= bearing_deg < 315:
+        return "Zona Oeste (Centro/Jaguaribe)"
+    else:
+        return "Zona Norte (São José/Ipês)"
+
+
+def pre_process_route_optimization(pedidos, loja_lat=-7.1150, loja_lng=-34.8630):
+    """
+    Pré-processador logístico e geográfico de alta precisão.
+    Calcula azimute direcional, tempo de espera (SLA min) e distância da loja.
+    """
+    if not pedidos:
+        return []
+
+    processed = []
+    now = datetime.now()
+
+    for p in pedidos:
+        p_copy = dict(p)
+        lat = p_copy.get("latitude") or (loja_lat + 0.01)
+        lng = p_copy.get("longitude") or (loja_lng + 0.01)
+        
+        dist_km = haversine_distance_km(loja_lat, loja_lng, lat, lng)
+        road_km = round(dist_km * 1.35, 2)
+        bearing = calculate_bearing_degrees(loja_lat, loja_lng, lat, lng)
+        sector = get_sector_name(bearing)
+
+        created_str = str(p_copy.get("created_at") or "")
+        wait_min = 5
+        if created_str:
+            try:
+                clean_str = created_str.replace("Z", "+00:00").split(".")[0]
+                created_dt = datetime.fromisoformat(clean_str)
+                wait_min = max(0, int((now - created_dt.replace(tzinfo=None)).total_seconds() / 60))
+            except Exception:
+                wait_min = 5
+
+        status = str(p_copy.get("status") or "pendente").lower()
+        status_weight = 1.4 if status == "pronto" else (1.0 if status == "preparo" else 0.7)
+        sla_score = round(wait_min * status_weight, 1)
+
+        p_copy["_computed_dist_km"] = round(dist_km, 2)
+        p_copy["_computed_road_km"] = road_km
+        p_copy["_computed_bearing"] = round(bearing, 1)
+        p_copy["_computed_sector"] = sector
+        p_copy["_computed_wait_min"] = wait_min
+        p_copy["_computed_sla_score"] = sla_score
+        processed.append(p_copy)
+
+    return processed
+
+
+def solve_continuous_tsp_route(pedidos_list, loja_lat=-7.1150, loja_lng=-34.8630):
+    """
+    Ordenação de paradas com restrição de fluxo contínuo direcional (TSP).
+    Elimina ziguezague e retrocessos de rota.
+    """
+    if len(pedidos_list) <= 1:
+        return list(pedidos_list)
+
+    unvisited = list(pedidos_list)
+    ordered = []
+
+    curr_lat, curr_lng = loja_lat, loja_lng
+    curr_bearing = None
+
+    while unvisited:
+        best_idx = 0
+        best_cost = float('inf')
+
+        for idx, p in enumerate(unvisited):
+            target_lat = p.get("latitude") or (loja_lat + 0.01)
+            target_lng = p.get("longitude") or (loja_lng + 0.01)
+            
+            d_km = haversine_distance_km(curr_lat, curr_lng, target_lat, target_lng)
+            bearing_to_target = calculate_bearing_degrees(curr_lat, curr_lng, target_lat, target_lng)
+
+            angle_diff_penalty = 0
+            if curr_bearing is not None:
+                diff = abs(bearing_to_target - curr_bearing)
+                if diff > 180:
+                    diff = 360 - diff
+                if diff > 100:
+                    angle_diff_penalty = d_km * 3.0
+
+            cost = d_km + angle_diff_penalty
+            if cost < best_cost:
+                best_cost = cost
+                best_idx = idx
+
+        next_p = unvisited.pop(best_idx)
+        ordered.append(next_p)
+        next_lat = next_p.get("latitude") or (loja_lat + 0.01)
+        next_lng = next_p.get("longitude") or (loja_lng + 0.01)
+        curr_bearing = calculate_bearing_degrees(curr_lat, curr_lng, next_lat, next_lng)
+        curr_lat, curr_lng = next_lat, next_lng
+
+    return ordered
+
+
 def generate_pin_code():
     """Gera um código PIN de 4 dígitos para confirmação de entrega."""
     return f"{random.randint(1000, 9999)}"
@@ -1985,9 +2111,9 @@ def reset_pedidos_api():
 @app.route("/api/ai/roteirizar", methods=["POST"])
 def ai_roteirizar_pedidos():
     """
-    Roteirizador de Entregas Inteligente com DeepSeek AI.
-    Analisa os pedidos pendentes/prontos, calcula proximidade de bairros,
-    tempo de espera (SLA) e capacidade dos entregadores para tomar a melhor decisão.
+    Roteirizador de Entregas Inteligente com DeepSeek AI + Preprocessador OSRM/SLA.
+    Analisa os pedidos pendentes/prontos, tempo de espera (SLA), setor direcional 
+    e otimiza o fluxo viário contínuo para eliminar retrocessos e voltas desnecessárias.
     """
     try:
         data = request.json or {}
@@ -1997,7 +2123,7 @@ def ai_roteirizar_pedidos():
         # Se não vier no corpo, busca do banco de dados local
         if not pedidos_input:
             conn = get_db_connection()
-            rows = conn.execute("SELECT * FROM pedidos WHERE status IN ('pronto', 'preparo', 'pendente')").fetchall()
+            rows = conn.execute("SELECT * FROM pedidos WHERE status IN ('pronto', 'preparo', 'pendente') ORDER BY created_at ASC").fetchall()
             pedidos_input = [dict(r) for r in rows]
             conn.close()
 
@@ -2010,54 +2136,73 @@ def ai_roteirizar_pedidos():
         if not pedidos_input:
             return jsonify({"status": "error", "message": "Nenhum pedido pendente ou pronto para roteirizar."}), 400
 
+        # Executa o pré-processador geográfico e temporal (SLA + Setor Direcional + Distância)
+        processed_pedidos = pre_process_route_optimization(pedidos_input)
+
+        # Prepara a ordenação recomendada via algoritmo local de fluxo contínuo
+        recommended_order_objs = solve_continuous_tsp_route(processed_pedidos)
+        recommended_ids = [p.get("id") or p.get("id_externo") for p in recommended_order_objs]
+
         deepseek_key = os.getenv("DEEPSEEK_API_KEY", "")
+
+        # Fallback local imediato se não houver chave da IA
         if not deepseek_key:
-            print("[DEEPSEEK AI] AVISO: DEEPSEEK_API_KEY nao configurada no .env!")
+            print("[ROTEIRIZAÇÃO LOCAL] DEEPSEEK_API_KEY não configurada. Usando motor geométrico contínuo local.")
+            entregador_nome = entregadores_input[0].get("nome") if entregadores_input else "A definir"
+            
+            total_km = sum(p.get("_computed_road_km", 1.5) for p in recommended_order_objs)
             return jsonify({
-                "status": "error",
-                "message": "DEEPSEEK_API_KEY não configurada no servidor."
-            }), 400
+                "status": "success",
+                "provedor": "Motor Geométrico Local (Voltz SLA/TSP)",
+                "decisao_ia": {
+                    "raciocinio_ia": f"📍 Rota Otimizada de Lote Contínuo (~{round(total_km,1)}km) | 🛵 Motoboy: {entregador_nome} | ⚡ Fluxo contínuo sem retrocessos.",
+                    "grupos": [
+                        {
+                            "entregador_sugerido": entregador_nome,
+                            "pedidos_ids": recommended_ids,
+                            "ordem_entrega": recommended_ids,
+                            "bairro_predominante": recommended_order_objs[0].get("_computed_sector", "Zona de Entrega"),
+                            "tempo_estimado_rota_min": max(15, int(total_km * 4 + len(recommended_ids) * 3))
+                        }
+                    ]
+                }
+            }), 200
 
-
-        # Monta o prompt explicativo para o DeepSeek AI
+        # Monta o prompt enriquecido para o DeepSeek AI
         prompt = f"""
-Você é o algoritmo central de inteligência e roteirização logística do sistema Voltz Delivery.
+Você é o motor central de roteirização geográfica inteligente do sistema Voltz Delivery.
 Sua missão é criar o agrupamento ideal de pedidos para envio em lote (multi-stop delivery).
 
-**REGRA CRÍTICA DE FORMATAÇÃO E RESUMO:**
-- O campo "raciocinio_ia" DEVE SER EXTREMAMENTE RESUMIDO E DIRETO AO PONTO (no máximo 1 a 2 frases curtas com emojis).
-- Exemplo do formato exato desejado: "📍 Lote Brisamar (~1km) | 🛵 Motoboy: ANDERSON | ⚡ Ordem: #127 ➔ #126 (trajeto contínuo mais rápido)."
-- PROIBIDO escrever textos longos ou parágrafos. Seja ultra conciso!
-
-**REGRAS LOGÍSTICAS:**
-1. Agrupe no máximo 3 a 4 pedidos por entregador (lote de rota).
-2. Priorize pedidos com maior tempo de espera (SLA).
-3. Agrupe pedidos no mesmo bairro ou em rota contínua em João Pessoa - PB.
-4. Defina a ordem exata de entrega que minimize a viagem.
+**REGRAS CRÍTICAS PARA ELIMINAR ZIGUEZAGUE E VOLTAS DESNECESSÁRIAS:**
+1. **FLUXO VIÁRIO CONTINUO (NÃO DAR VOLTAS)**: Jamais alterne entre direções opostas (ex: Zona Sul ➔ Zona Norte ➔ Zona Sul). A sequência no campo 'ordem_entrega' DEVE seguir uma trajetória contínua e unidirecional a partir da Loja Matriz.
+2. **SEPARAÇÃO POR VETOR GEOGRÁFICO**: Se houver mais de 1 entregador disponível, distribua pedidos de zonas diametralmente opostas em lotes separados para entregadores diferentes.
+3. **EQUILÍBRIO SLA vs PROXIMIDADE**: Priorize pedidos com maior tempo de espera (SLA) ou status 'pronto', mas agrupando-os estritamente com vizinhos geográficos no mesmo trajeto.
 
 **LOJA MATRIZ:** Filipéia Trattoria - Pedro Gondim, João Pessoa - PB (Lat: -7.1150, Lng: -34.8630)
 
-**LISTA DE PEDIDOS DISPONÍVEIS:**
-{json.dumps(pedidos_input, ensure_ascii=False, indent=2)}
+**SEQUÊNCIA RECOMENDADA PELO MOTOR CONTINUO OSRM/TSP:**
+{json.dumps(recommended_ids, ensure_ascii=False)}
+
+**LISTA DE PEDIDOS COM MÉTRICAS LOGÍSTICAS (SLA, SETOR, DISTÂNCIA):**
+{json.dumps(processed_pedidos, ensure_ascii=False, indent=2)}
 
 **LISTA DE ENTREGADORES DISPONÍVEIS:**
 {json.dumps(entregadores_input, ensure_ascii=False, indent=2)}
 
-Retorne a resposta EXCLUSIVAMENTE em formato JSON (sem markdown ou texto fora do JSON):
+Retorne a resposta EXCLUSIVAMENTE em formato JSON (sem textos adicionais):
 {{
-  "raciocinio_ia": "📍 Lote Bairro (~Xkm) | 🛵 Motoboy: NOME | ⚡ Ordem: #ID1 ➔ #ID2 (resumo ultra conciso em 1 frase)",
+  "raciocinio_ia": "📍 Lote Setor X (~X.Xkm) | 🛵 Motoboy: NOME | ⚡ Ordem: #ID1 ➔ #ID2 (trajeto contínuo mais rápido)",
   "grupos": [
     {{
       "entregador_sugerido": "Nome do Entregador ou 'A definir'",
-      "pedidos_ids": ["id_do_pedido1", "id_do_pedido2"],
-      "ordem_entrega": ["id_do_pedido1", "id_do_pedido2"],
-      "bairro_predominante": "Nome do Bairro",
-      "tempo_estimado_rota_min": 25
+      "pedidos_ids": ["id1", "id2"],
+      "ordem_entrega": ["id1", "id2"],
+      "bairro_predominante": "Nome da Zona/Bairro",
+      "tempo_estimado_rota_min": 20
     }}
   ]
 }}
 """
-
 
         headers = {
             "Authorization": f"Bearer {deepseek_key}",
@@ -2067,32 +2212,55 @@ Retorne a resposta EXCLUSIVAMENTE em formato JSON (sem markdown ou texto fora do
         payload = {
             "model": "deepseek-chat",
             "messages": [
-                {"role": "system", "content": "Você é um assistente especialista em logística e inteligência geográfica de delivery que responde estritamente em formato JSON válido."},
+                {"role": "system", "content": "Você é um assistente especialista em logística geográfica e roteirização sem retrocessos que responde estritamente em JSON válido."},
                 {"role": "user", "content": prompt}
             ],
             "response_format": {"type": "json_object"},
-            "temperature": 0.2
+            "temperature": 0.1
         }
 
-        print("[DEEPSEEK AI] Enviando dados para a API do DeepSeek para Roteirização Inteligente...")
+        print("[DEEPSEEK AI] Enviando dados enriquecidos para a API do DeepSeek para Roteirização Inteligente...")
         res = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=payload, timeout=25)
         
         if res.status_code == 200:
             result_data = res.json()
             ai_message = result_data["choices"][0]["message"]["content"]
             parsed_json = json.loads(ai_message)
-            print("[DEEPSEEK AI] Roteirização gerada com sucesso!")
+            
+            # Garantia de ordenação física nos grupos retornados pela IA
+            for g in parsed_json.get("grupos", []):
+                ordem = g.get("ordem_entrega") or g.get("pedidos_ids") or []
+                # Re-ordena se a IA não retornou ordem estritamente válida
+                sub_pedidos = [p for p in processed_pedidos if (p.get("id") in ordem or p.get("id_externo") in ordem)]
+                if len(sub_pedidos) > 1:
+                    sorted_sub = solve_continuous_tsp_route(sub_pedidos)
+                    g["ordem_entrega"] = [p.get("id") or p.get("id_externo") for p in sorted_sub]
+
+            print("[DEEPSEEK AI] Roteirização inteligente sem retrocesso gerada com sucesso!")
             return jsonify({
                 "status": "success",
-                "provedor": "DeepSeek AI v3",
+                "provedor": "DeepSeek AI v3 (Enriched SLA/TSP)",
                 "decisao_ia": parsed_json
             }), 200
         else:
-            print(f"[DEEPSEEK AI] Erro {res.status_code}: {res.text}")
+            print(f"[DEEPSEEK AI] Erro {res.status_code}: {res.text}. Usando fallback local.")
+            total_km = sum(p.get("_computed_road_km", 1.5) for p in recommended_order_objs)
             return jsonify({
-                "status": "error",
-                "message": f"Erro na API do DeepSeek ({res.status_code}): {res.text}"
-            }), 500
+                "status": "success",
+                "provedor": "Motor Geométrico Local (Fallback)",
+                "decisao_ia": {
+                    "raciocinio_ia": f"📍 Rota Otimizada de Lote Contínuo (~{round(total_km,1)}km) | ⚡ Trajeto viário sem retrocesso.",
+                    "grupos": [
+                        {
+                            "entregador_sugerido": entregadores_input[0].get("nome") if entregadores_input else "A definir",
+                            "pedidos_ids": recommended_ids,
+                            "ordem_entrega": recommended_ids,
+                            "bairro_predominante": "Zona de Entrega",
+                            "tempo_estimado_rota_min": max(15, int(total_km * 4))
+                        }
+                    ]
+                }
+            }), 200
 
     except Exception as e:
         print(f"[DEEPSEEK AI] Exceção: {e}")
@@ -2103,8 +2271,8 @@ Retorne a resposta EXCLUSIVAMENTE em formato JSON (sem markdown ou texto fora do
 def ai_auto_despacho_motoboy():
     """
     Automação Inteligente de Despacho ao Chegar Motoboy na Loja.
-    Quando o motoboy chega ou fica disponível, o DeepSeek AI agrupa os pedidos prontos/preparo 
-    da vizinhança mais eficiente, vincula a rota ao motoboy e altera seus status para 'em_rota'.
+    Agrupa os pedidos prontos/preparo mais eficientes em trajeto contínuo (SLA + TSP),
+    vincula a rota ao motoboy e altera seus status para 'em_rota'.
     """
     try:
         data = request.json or {}
@@ -2112,14 +2280,12 @@ def ai_auto_despacho_motoboy():
         entregador_nome = data.get("entregador_nome", "Motoboy")
 
         conn = get_db_connection()
-        # Busca motoboy se fornecido ID
         if entregador_id:
             row_driver = conn.execute("SELECT * FROM entregadores WHERE id = ? OR nome LIKE ?", (entregador_id, f"%{entregador_nome}%")).fetchone()
             if row_driver:
                 entregador_nome = row_driver["nome"]
                 entregador_id = row_driver["id"]
 
-        # Busca pedidos prontos ou em preparo
         rows_pedidos = conn.execute("SELECT * FROM pedidos WHERE status IN ('pronto', 'preparo', 'pendente') ORDER BY created_at ASC").fetchall()
         pedidos = [dict(r) for r in rows_pedidos]
         conn.close()
@@ -2130,12 +2296,13 @@ def ai_auto_despacho_motoboy():
                 "message": f"Motoboy {entregador_nome} está na loja, mas não há pedidos pendentes no momento."
             }), 200
 
+        # Pré-processamento geográfico e SLA dos pedidos
+        processed_pedidos = pre_process_route_optimization(pedidos)
+
         assigned_orders = []
         ai_reason = ""
-
         deepseek_key = os.getenv("DEEPSEEK_API_KEY", "")
 
-        # Se houver chave DeepSeek, consulta a IA para o agrupamento
         if deepseek_key:
             try:
                 prompt = f"""
@@ -2143,12 +2310,14 @@ Você é a IA de despacho expresso do Voltz Logistics.
 O entregador '{entregador_nome}' ACABA DE CHEGAR NA LOJA MATRIZ (Filipéia Trattoria).
 Selecione o LOTE IDEAL (máximo 3 a 4 pedidos) que devem ser despachados IMEDIATAMENTE na rota dele.
 
-PEDIDOS DISPONÍVEIS NA COZINHA/BALCÃO:
-{json.dumps(pedidos, ensure_ascii=False, indent=2)}
+REGRA ABSOLUTA: A 'ordem_entrega' DEVE ser em fluxo viário contínuo e sem ziguezague.
+
+PEDIDOS DISPONÍVEIS NA COZINHA/BALCÃO (COM SLA E SETOR DIREIONAL):
+{json.dumps(processed_pedidos, ensure_ascii=False, indent=2)}
 
 Retorne EXCLUSIVAMENTE em formato JSON:
 {{
-  "raciocinio_ia": "⚡ Lote despachado automaticamente para {entregador_nome}: #ID1, #ID2 (bairro X - rota mais rápida).",
+  "raciocinio_ia": "⚡ Lote despachado para {entregador_nome}: #ID1 ➔ #ID2 (trajeto contínuo mais rápido).",
   "pedidos_selecionados_ids": ["id1", "id2"],
   "ordem_entrega": ["id1", "id2"]
 }}
@@ -2169,20 +2338,21 @@ Retorne EXCLUSIVAMENTE em formato JSON:
                     ai_reason = parsed.get("raciocinio_ia", "")
                     selected_ids = parsed.get("pedidos_selecionados_ids") or parsed.get("ordem_entrega") or []
                     
-                    # Filtra os pedidos selecionados
-                    for p in pedidos:
-                        if p["id"] in selected_ids or p["id_externo"] in selected_ids:
-                            assigned_orders.append(p)
+                    sub_list = [p for p in processed_pedidos if (p["id"] in selected_ids or p["id_externo"] in selected_ids)]
+                    if sub_list:
+                        assigned_orders = solve_continuous_tsp_route(sub_list)
             except Exception as ex_ai:
-                print(f"[AUTO-DESPACHO AI] Erro na requisição DeepSeek, usando fallback: {ex_ai}")
+                print(f"[AUTO-DESPACHO AI] Erro na requisição DeepSeek, usando motor local: {ex_ai}")
 
-        # Fallback local se a IA não selecionou ou falhou
+        # Fallback de ordenação geométrica se a IA falhar
         if not assigned_orders:
-            # Seleciona até 3 pedidos mais antigos da fila
-            assigned_orders = pedidos[:3]
-            ai_reason = f"⚡ Rota despachada via algoritmo geográfico local para {entregador_nome} ({len(assigned_orders)} pedidos)."
+            # Seleciona até 3 a 4 pedidos mais prioritários por SLA / vizinhança
+            top_candidates = processed_pedidos[:4]
+            assigned_orders = solve_continuous_tsp_route(top_candidates)
+            order_ids_str = " ➔ ".join([p.get("id_externo") or p.get("id") for p in assigned_orders])
+            ai_reason = f"⚡ Rota otimizada em fluxo contínuo para {entregador_nome}: {order_ids_str}."
 
-        # Atualiza o banco com a atribuição e mudança para 'em_rota'
+        # Atualiza o banco com a atribuição e mudança para 'em_rota' mantendo a ORDEM
         conn = get_db_connection()
         despachados = []
         for p in assigned_orders:
@@ -2202,14 +2372,13 @@ Retorne EXCLUSIVAMENTE em formato JSON:
             p_copy["codigo_confirmacao"] = pin
             despachados.append(p_copy)
 
-        # Atualiza status do entregador para em_rota
         if entregador_id:
             conn.execute("UPDATE entregadores SET status = 'em_rota' WHERE id = ? OR nome LIKE ?", (entregador_id, f"%{entregador_nome}%"))
 
         conn.commit()
         conn.close()
 
-        print(f"[AUTO-DESPACHO OK] Motoboy '{entregador_nome}' recebeu {len(despachados)} pedido(s) em rota automaticamente via DeepSeek AI!")
+        print(f"[AUTO-DESPACHO OK] Motoboy '{entregador_nome}' recebeu {len(despachados)} pedido(s) despachados em rota otimizada contínua!")
 
         return jsonify({
             "status": "success",

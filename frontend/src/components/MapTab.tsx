@@ -277,31 +277,51 @@ export const MapTab: React.FC = () => {
         // Fallback em caso de erro de rede
       }
 
-      // Fallback: Algoritmo Nearest-Neighbor local
+      // Fallback: Algoritmo de fluxo contínuo direcional (TSP local sem ziguezague)
       let currentLat = loja.latitude;
       let currentLng = loja.longitude;
+      let currentBearing: number | null = null;
 
       const unvisited = [...selectedOrders];
       const ordered: Pedido[] = [];
 
       while (unvisited.length > 0) {
         let closestIdx = 0;
-        let minDistance = Infinity;
+        let minCost = Infinity;
 
         unvisited.forEach((p, idx) => {
           const targetLat = p.latitude || loja.latitude + 0.01;
           const targetLng = p.longitude || loja.longitude + 0.01;
           const dist = calcDistanceKm(currentLat, currentLng, targetLat, targetLng);
-          if (dist < minDistance) {
-            minDistance = dist;
+
+          let anglePenalty = 0;
+          const dlat = targetLat - currentLat;
+          const dlng = targetLng - currentLng;
+          const targetBearing = (Math.atan2(dlng, dlat) * (180 / Math.PI) + 360) % 360;
+
+          if (currentBearing !== null) {
+            let diff = Math.abs(targetBearing - currentBearing);
+            if (diff > 180) diff = 360 - diff;
+            if (diff > 100) anglePenalty = dist * 3.0;
+          }
+
+          const cost = dist + anglePenalty;
+          if (cost < minCost) {
+            minCost = cost;
             closestIdx = idx;
           }
         });
 
         const nextOrder = unvisited.splice(closestIdx, 1)[0];
         ordered.push(nextOrder);
-        currentLat = nextOrder.latitude || loja.latitude + 0.01;
-        currentLng = nextOrder.longitude || loja.longitude + 0.01;
+
+        const nextLat = nextOrder.latitude || loja.latitude + 0.01;
+        const nextLng = nextOrder.longitude || loja.longitude + 0.01;
+        const dlat = nextLat - currentLat;
+        const dlng = nextLng - currentLng;
+        currentBearing = (Math.atan2(dlng, dlat) * (180 / Math.PI) + 360) % 360;
+        currentLat = nextLat;
+        currentLng = nextLng;
       }
 
       setOrderedBatch(ordered);
