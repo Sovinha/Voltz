@@ -21,10 +21,13 @@ export interface OsrmStep {
 }
 
 export interface LojaConfig {
+  id?: string;
   nome: string;
   endereco: string;
   latitude: number;
   longitude: number;
+  telefone?: string;
+  ativa?: number | boolean;
 }
 
 interface InteractiveMapProps {

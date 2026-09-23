@@ -30,12 +30,14 @@ import {
   ExternalLink,
   ChevronRight,
   UserCheck,
-  Trash2
+  Trash2,
+  Building2
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured, Pedido, OrdemStatus } from '@/lib/supabase';
 import { getBackendUrl } from '@/lib/backend';
 import { LojaConfig } from './InteractiveMap';
 import { StoreFormModal } from './StoreFormModal';
+import { MultiStoreModal } from './MultiStoreModal';
 import { OriginBadge } from './OriginBadge';
 import { AlocarMotoboyModal } from './AlocarMotoboyModal';
 import { PedidoDetalhesModal } from './PedidoDetalhesModal';
@@ -107,21 +109,36 @@ export const MapTab: React.FC = () => {
   } | null>(null);
 
 
-  // Configuração da Loja Matriz
+  // Configuração da Loja Matriz & Filiais Multi-Lojas
   const [loja, setLoja] = useState<LojaConfig>({
     nome: 'Filipéia Trattoria Express',
     endereco: 'R. Orestes Lisboa, 124 - Pedro Gondim, João Pessoa - PB',
     latitude: -7.1155,
     longitude: -34.8601,
   });
+  const [isMultiStoreModalOpen, setIsMultiStoreModalOpen] = useState(false);
 
   const peakInfo = checkIsPeakHour();
 
   useEffect(() => {
-    const savedLoja = localStorage.getItem('loja_matriz');
-    if (savedLoja) {
-      try { setLoja(JSON.parse(savedLoja)); } catch {}
-    }
+    const fetchLojasInicial = async () => {
+      try {
+        const backendUrl = getBackendUrl();
+        const res = await fetch(`${backendUrl}/api/lojas`);
+        if (res.ok) {
+          const lojasList: LojaConfig[] = await res.json();
+          if (lojasList.length > 0) {
+            setLoja(lojasList[0]);
+          }
+        }
+      } catch (err) {
+        const savedLoja = localStorage.getItem('loja_matriz');
+        if (savedLoja) {
+          try { setLoja(JSON.parse(savedLoja)); } catch {}
+        }
+      }
+    };
+    fetchLojasInicial();
   }, []);
 
   const handleSaveLoja = (novaLoja: LojaConfig) => {
@@ -702,6 +719,15 @@ export const MapTab: React.FC = () => {
           </div>
 
           <button
+            onClick={() => setIsMultiStoreModalOpen(true)}
+            className="px-2 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold text-[11px] transition-all flex items-center gap-1 shadow"
+            title="Gerenciar Filiais Multi-Lojas"
+          >
+            <Building2 className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden md:inline">{loja.nome.split(' - ')[0] || 'Filiais'}</span>
+          </button>
+
+          <button
             onClick={() => setIsWebhookModalOpen(true)}
             className="px-2 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-[11px] transition-all flex items-center gap-1 shadow hover:scale-102"
           >
@@ -1202,6 +1228,16 @@ export const MapTab: React.FC = () => {
           setPedidos((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
           if (selectedPedido?.id === updated.id) setSelectedPedido(updated);
           alert(`✅ Pedido #${updated.id_externo} editado e salvo com sucesso!`);
+        }}
+      />
+
+      <MultiStoreModal
+        isOpen={isMultiStoreModalOpen}
+        onClose={() => setIsMultiStoreModalOpen(false)}
+        lojaAtiva={loja}
+        onSelectLoja={(novaLoja) => {
+          setLoja(novaLoja);
+          localStorage.setItem('loja_matriz', JSON.stringify(novaLoja));
         }}
       />
     </div>

@@ -102,7 +102,9 @@ def init_local_db():
         ("notificacao_saida_enviada", "INTEGER DEFAULT 0"),
         ("notificacao_proximidade_enviada", "INTEGER DEFAULT 0"),
         ("motoboy_latitude", "REAL"),
-        ("motoboy_longitude", "REAL")
+        ("motoboy_longitude", "REAL"),
+        ("loja_id", "TEXT"),
+        ("loja_nome", "TEXT")
     ]
     cursor.execute("PRAGMA table_info(pedidos)")
     existing_cols = [r[1] for r in cursor.fetchall()]
@@ -139,7 +141,37 @@ def init_local_db():
                 pass
 
 
-    # Tabela de Cache de Geocodificação — evita chamadas repetidas para o mesmo endereço
+    # Tabela Multi-Lojas (Múltiplas Filiais)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS lojas (
+            id TEXT PRIMARY KEY,
+            nome TEXT NOT NULL,
+            endereco TEXT NOT NULL,
+            latitude REAL NOT NULL,
+            longitude REAL NOT NULL,
+            telefone TEXT,
+            ativa INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+    # Inicializa Loja Matriz Padrão se não houver nenhuma cadastrada
+    cursor.execute("SELECT COUNT(*) FROM lojas")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("""
+            INSERT INTO lojas (id, nome, endereco, latitude, longitude, telefone, ativa, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+        """, (
+            "loja_matriz",
+            "Filipéia Trattoria - Pedro Gondim",
+            "R. Manuel França, 56 - Pedro Gondim, João Pessoa - PB",
+            -7.1150,
+            -34.8630,
+            "(83) 99999-0000",
+            datetime.now().isoformat()
+        ))
+
+    # Tabela de Cache de Geocodificação
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS geocode_cache (
             address_hash TEXT PRIMARY KEY,
@@ -156,14 +188,45 @@ def init_local_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_pedidos_status ON pedidos(status);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_pedidos_created_at ON pedidos(created_at);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_pedidos_id_externo ON pedidos(id_externo);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pedidos_loja_id ON pedidos(loja_id);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_entregadores_status ON entregadores(status);")
 
     conn.commit()
     conn.close()
 
 
-# Garante que a tabela local exista ao iniciar
+from datetime import timedelta
+
+def purge_expired_orders(hours=24):
+    """
+    Purga automaticamente pedidos criados há mais de `hours` horas (padrão 24h).
+    Garante que pedidos não durem mais de 24 horas no banco de dados.
+    """
+    try:
+        cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
+        conn = get_db_connection()
+        cursor = conn.execute("DELETE FROM pedidos WHERE created_at < ?", (cutoff,))
+        purged_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+
+        if supabase:
+            try:
+                supabase.table("pedidos").delete().lt("created_at", cutoff).execute()
+            except Exception:
+                pass
+
+        if purged_count > 0:
+            print(f"[AUTO-PURGE 24H] {purged_count} pedido(s) criados há mais de {hours}h foram purgados do banco de dados.")
+        return purged_count
+    except Exception as e:
+        print(f"[AUTO-PURGE ERRO] Falha ao expirar pedidos: {e}")
+        return 0
+
+
+# Garante que as tabelas locais existam e purga pedidos vencidos ao iniciar
 init_local_db()
+purge_expired_orders(24)
 
 
 @app.route("/", methods=["GET"])
@@ -2011,35 +2074,122 @@ def realizar_fechamento_entregador(id_entregador):
     return jsonify(recibo), 200
 
 
+@app.route("/api/lojas", methods=["GET"])
+def listar_lojas():
+    """Retorna todas as lojas/filiais cadastradas no sistema."""
+    conn = get_db_connection()
+    rows = conn.execute("SELECT * FROM lojas ORDER BY ativa DESC, created_at ASC").fetchall()
+    conn.close()
+    lojas = [dict(r) for r in rows]
+    return jsonify(lojas), 200
+
+
+@app.route("/api/lojas", methods=["POST"])
+def cadastrar_loja():
+    """Cadastra uma nova filial de loja no sistema."""
+    data = request.get_json(silent=True) or {}
+    nome = data.get("nome", "").strip()
+    endereco = data.get("endereco", "").strip()
+    lat = data.get("latitude")
+    lng = data.get("longitude")
+    telefone = data.get("telefone", "").strip()
+
+    if not nome or not endereco:
+        return jsonify({"error": "Campos 'nome' e 'endereco' são obrigatórios"}), 400
+
+    if lat is None or lng is None or lat == 0 or lng == 0:
+        coords = _geocode_best_effort(endereco)
+        lat, lng = coords[0], coords[1]
+
+    loja_id = f"loja_{uuid.uuid4().hex[:8]}"
+    created_at = datetime.now().isoformat()
+
+    conn = get_db_connection()
+    conn.execute("""
+        INSERT INTO lojas (id, nome, endereco, latitude, longitude, telefone, ativa, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+    """, (loja_id, nome, endereco, lat, lng, telefone, created_at))
+    conn.commit()
+    conn.close()
+
+    nova_loja = {
+        "id": loja_id,
+        "nome": nome,
+        "endereco": endereco,
+        "latitude": lat,
+        "longitude": lng,
+        "telefone": telefone,
+        "ativa": 1,
+        "created_at": created_at
+    }
+    return jsonify({"status": "success", "loja": nova_loja}), 201
+
+
+@app.route("/api/lojas/<id_loja>", methods=["PATCH", "DELETE"])
+def gerenciar_loja(id_loja):
+    """Atualiza ou remove uma filial de loja."""
+    conn = get_db_connection()
+
+    if request.method == "DELETE":
+        count = conn.execute("SELECT COUNT(*) FROM lojas").fetchone()[0]
+        if count <= 1:
+            conn.close()
+            return jsonify({"error": "Não é possível excluir a única loja cadastrada no sistema."}), 400
+        
+        conn.execute("DELETE FROM lojas WHERE id = ?", (id_loja,))
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "success", "mensagem": "Loja removida com sucesso!"}), 200
+
+    data = request.get_json(silent=True) or {}
+    fields = []
+    values = []
+
+    for key in ["nome", "endereco", "latitude", "longitude", "telefone", "ativa"]:
+        if key in data:
+            fields.append(f"{key} = ?")
+            values.append(data[key])
+
+    if not fields:
+        conn.close()
+        return jsonify({"error": "Nenhum campo fornecido para atualização"}), 400
+
+    values.append(id_loja)
+    conn.execute(f"UPDATE lojas SET {', '.join(fields)} WHERE id = ?", tuple(values))
+    conn.commit()
+    conn.close()
+
+    return jsonify({"status": "success", "mensagem": "Loja atualizada com sucesso!"}), 200
+
+
 @app.route("/api/sistema/reset-total", methods=["POST", "DELETE"])
 def reset_sistema_total():
     """
-    Zera completamente todos os pedidos e entregadores do banco de dados SQLite/Supabase.
-    Prepara o sistema do zero para início de testes com operação real.
+    Zera os pedidos do banco de dados, mas preserva a frota de entregadores e lojas.
+    Motoboys apenas são excluídos manualmente pelo usuário.
     """
     if supabase:
         try:
             supabase.table("pedidos").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
-            supabase.table("entregadores").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
         except Exception as e:
             print(f"[AVISO Supabase Reset] {e}")
 
     conn = get_db_connection()
     conn.execute("DELETE FROM pedidos")
-    conn.execute("DELETE FROM entregadores")
+    conn.execute("UPDATE entregadores SET status = 'disponivel', total_entregas = 0, frete_acumulado = 0.0")
     conn.commit()
     conn.close()
 
-    print("[SISTEMA RESET] Banco de dados completamente zerado para testes reais!")
+    print("[SISTEMA RESET] Todos os pedidos foram zerados! Motoboys preservados na frota.")
     return jsonify({
         "status": "success",
-        "mensagem": "Sistema zerado com sucesso! Todos os pedidos e entregadores foram removidos para início dos testes reais."
+        "mensagem": "Pedidos zerados com sucesso! A frota de motoboys foi mantida."
     }), 200
 
 
 @app.route("/api/entregadores/<id_entregador>", methods=["PATCH", "DELETE"])
 def gerenciar_entregador_individual(id_entregador):
-    """Atualiza ou remove um entregador específico da frota."""
+    """Atualiza ou remove um entregador específico da frota (exclusão manual feita pelo usuário)."""
     conn = get_db_connection()
 
     if request.method == "DELETE":
@@ -2073,18 +2223,12 @@ def gerenciar_entregador_individual(id_entregador):
 
 @app.route("/api/entregadores/reset", methods=["POST", "PUT", "DELETE"])
 def reset_entregadores_api():
-    """Zera e deleta 100% da frota de entregadores para permitir cadastro limpo do zero."""
-    if supabase:
-        try:
-            supabase.table("entregadores").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
-        except Exception as e:
-            print(f"[AVISO] Falha ao resetar entregadores no Supabase: {e}")
-
+    """Reseta status da frota de entregadores mantendo seus cadastros."""
     conn = get_db_connection()
-    conn.execute("DELETE FROM entregadores")
+    conn.execute("UPDATE entregadores SET status = 'disponivel', total_entregas = 0, frete_acumulado = 0.0")
     conn.commit()
     conn.close()
-    return jsonify({"status": "success", "message": "Todos os entregadores foram deletados! Cadastro zerado."}), 200
+    return jsonify({"status": "success", "message": "Frota de entregadores resetada para 'disponível'! Cadastros preservados."}), 200
 
 
 @app.route("/api/pedidos/reset", methods=["POST", "DELETE"])
