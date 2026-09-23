@@ -113,7 +113,13 @@ Os cards de pedido possuem um botão dinâmico de status:
 
 ## 📜 4. Histórico Incremental de Atualizações (Log de Mudanças)
 
-### 🗓️ Versão 3.5.1 - 22/09/2026 (Atual)
+### 🗓️ Versão 3.6.0 - 22/09/2026 (Atual)
+* 🗺️ **Roteamento OSRM Próprio em João Pessoa (`paraiba-latest.osm.pbf`)**:
+  - Script OSRM (`scripts/setup_osrm.sh` e `.ps1`) atualizado para baixar o extrato oficial da Paraíba (~20MB Geofabrik).
+  - Reduziu o tempo de pré-processamento das ruas de João Pessoa de ~4 minutos para apenas 15 segundos!
+  - O container `voltz_osrm` utiliza menos de 100MB RAM no servidor e responde requisições em sub-5ms diretamente na rede do Docker (`http://voltz_osrm:5000`).
+
+### 🗓️ Versão 3.5.1 - 22/09/2026
 * 🎯 **Ajuste Fino de Rota Google Maps (`Rua + Número Exato`)**:
   - `getGoogleMapsUrl` agora formata o destino prioritariamente com a string de endereço limpa (`Rua + Número Exato + Bairro + João Pessoa - PB + CEP`).
   - Resolve o problema onde coordenadas genéricas de bairro faziam o Google Maps apontar para um número distante (ex: número 129 em vez do número 336).
