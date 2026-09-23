@@ -1746,7 +1746,8 @@ def despachar_pedido(id_pedido):
     conn.close()
 
     pin_code = pedido_atual.get("codigo_confirmacao") or generate_pin_code()
-    link_rastreio = f"http://localhost:3000/rastreio/{id_pedido}"
+    frontend_base_url = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
+    link_rastreio = f"{frontend_base_url}/rastreio/{id_pedido}"
     tel_cliente = telefone_cliente or pedido_atual.get("telefone_cliente") or ""
     tel_clean = "".join(filter(str.isdigit, str(tel_cliente)))
 
@@ -2358,7 +2359,8 @@ Retorne EXCLUSIVAMENTE em formato JSON:
         for p in assigned_orders:
             p_id = p["id"]
             pin = p.get("codigo_confirmacao") or generate_pin_code()
-            link = f"http://localhost:3000/rastreio/{p_id}"
+            frontend_base_url = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
+            link = f"{frontend_base_url}/rastreio/{p_id}"
 
             conn.execute("""
                 UPDATE pedidos 
