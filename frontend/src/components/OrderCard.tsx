@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MapPin, User, ChevronDown, ChevronUp, ArrowRight, ArrowLeft, Clock, AlertTriangle, Flame, Trash2 } from 'lucide-react';
+import { MapPin, User, ChevronDown, ChevronUp, ArrowRight, ArrowLeft, Clock, AlertTriangle, Flame, Trash2, Phone, Copy, Check } from 'lucide-react';
 import { Pedido, OrdemStatus } from '@/lib/supabase';
 import { OriginBadge } from './OriginBadge';
 import { analyzeOrderItems } from '@/lib/beverageDetection';
@@ -20,6 +20,7 @@ export const OrderCard: React.FC<OrderCardProps> = ({
   const [showItems, setShowItems] = useState(false);
   const [loading, setLoading] = useState(false);
   const [elapsedMinutes, setElapsedMinutes] = useState(0);
+  const [copiedAddress, setCopiedAddress] = useState(false);
 
   // Calcula o tempo decorrido em minutos a partir de created_at
   useEffect(() => {
@@ -35,7 +36,7 @@ export const OrderCard: React.FC<OrderCardProps> = ({
     };
 
     calcElapsed();
-    const interval = setInterval(calcElapsed, 10000); // Atualiza o timer a cada 10 segundos
+    const interval = setInterval(calcElapsed, 10000);
     return () => clearInterval(interval);
   }, [pedido.created_at]);
 
@@ -52,53 +53,57 @@ export const OrderCard: React.FC<OrderCardProps> = ({
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
   };
 
-  const formatTime = (dateStr: string) => {
-    try {
-      const date = new Date(dateStr);
-      return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    } catch {
-      return '';
+  const handleCopyAddress = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (pedido.endereco_entrega) {
+      navigator.clipboard.writeText(pedido.endereco_entrega);
+      setCopiedAddress(true);
+      setTimeout(() => setCopiedAddress(false), 2000);
     }
   };
 
   // Verificação de SLA e Atraso na Cozinha
-  const isPendingOrPreparing = pedido.status === 'pendente' || pedido.status === 'preparando';
+  const isPendingOrPreparing = pedido.status === 'pendente' || pedido.status === 'preparando' || pedido.status === 'preparo';
   const isDelayed = isPendingOrPreparing && elapsedMinutes >= slaThresholdMin;
   const minutesOverdue = elapsedMinutes - slaThresholdMin;
 
+  // Format WhatsApp number
+  const cleanPhone = pedido.telefone_cliente ? pedido.telefone_cliente.replace(/\D/g, '') : '';
+  const waUrl = cleanPhone ? `https://wa.me/55${cleanPhone}` : null;
+
   return (
     <div
-      className={`relative backdrop-blur rounded-xl p-4 shadow-lg transition-all group duration-300 border ${
+      className={`relative backdrop-blur-xl rounded-2xl p-4 shadow-xl transition-all duration-300 border ${
         isDelayed
-          ? 'bg-rose-950/30 border-rose-500/80 shadow-rose-900/30 animate-pulse ring-2 ring-rose-500/50'
-          : 'bg-slate-800/80 border-slate-700/80 hover:border-slate-600'
+          ? 'bg-gradient-to-b from-rose-950/40 to-slate-900/90 border-rose-500/80 shadow-rose-900/30 ring-2 ring-rose-500/50 hover:shadow-rose-900/50'
+          : 'bg-slate-900/85 border-slate-800/90 hover:border-slate-700 hover:bg-slate-900/95 hover:shadow-2xl'
       }`}
     >
       {/* Alerta Visual Superior de SLA Excedido */}
       {isDelayed && (
-        <div className="mb-2 flex items-center justify-between bg-rose-500/20 border border-rose-500/40 px-2.5 py-1 rounded-lg text-rose-300 text-[11px] font-bold animate-bounce">
-          <span className="flex items-center gap-1">
-            <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
-            ⚠️ SLA EXCEDIDO (+{minutesOverdue} min)
+        <div className="mb-3 flex items-center justify-between bg-gradient-to-r from-rose-500/25 to-red-500/25 border border-rose-500/50 px-3 py-1.5 rounded-xl text-rose-200 text-[11px] font-extrabold shadow-inner">
+          <span className="flex items-center gap-1.5">
+            <AlertTriangle className="w-4 h-4 text-rose-400 animate-bounce" />
+            <span>SLA EXCEDIDO (+{minutesOverdue} min)</span>
           </span>
-          <span className="text-[10px] bg-rose-600 text-white px-1.5 py-0.5 rounded font-mono">
-            PRIORIDADE ALTA
+          <span className="text-[10px] bg-rose-600 text-white px-2 py-0.5 rounded-md font-mono uppercase tracking-wider font-extrabold">
+            URGENTE
           </span>
         </div>
       )}
 
       {/* Cabeçalho do Card */}
-      <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-700/60">
+      <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-800/80">
         <OriginBadge origem={pedido.origem} />
 
         <div className="flex items-center gap-2 text-xs font-mono">
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 bg-slate-950/70 px-2.5 py-1 rounded-lg border border-slate-800/80">
             <Clock className={`w-3.5 h-3.5 ${isDelayed ? 'text-rose-400 animate-spin' : 'text-slate-400'}`} />
-            <span className={isDelayed ? 'text-rose-400 font-bold' : 'text-slate-300'}>
-              ⏱️ {elapsedMinutes} min
+            <span className={isDelayed ? 'text-rose-400 font-extrabold' : 'text-slate-300 font-medium'}>
+              ⏱️ {elapsedMinutes}m
             </span>
             <span className="text-slate-600">•</span>
-            <span className="text-slate-300 font-semibold">{pedido.id_externo}</span>
+            <span className="text-white font-bold">{pedido.id_externo}</span>
           </div>
 
           {onDeletePedido && (
@@ -114,7 +119,7 @@ export const OrderCard: React.FC<OrderCardProps> = ({
                   }
                 }
               }}
-              className="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+              className="p-1.5 rounded-xl text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
               title="Deletar Pedido"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -124,29 +129,45 @@ export const OrderCard: React.FC<OrderCardProps> = ({
       </div>
 
       {/* Informações do Cliente */}
-      <div className="mt-3 space-y-2">
-        <div className="flex items-start justify-between">
-          <div className="flex items-start gap-2">
-            <User className="w-4 h-4 text-sky-400 mt-0.5 shrink-0" />
-            <div>
-              <h4 className="font-semibold text-sm text-slate-100 leading-tight flex items-center gap-1.5">
-                {pedido.nome_cliente}
-                {isDelayed && <Flame className="w-3.5 h-3.5 text-amber-400" />}
+      <div className="mt-3 space-y-2.5">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-start gap-2 min-w-0">
+            <div className="p-1.5 rounded-xl bg-sky-500/10 text-sky-400 border border-sky-500/20 shrink-0 mt-0.5">
+              <User className="w-3.5 h-3.5" />
+            </div>
+            <div className="min-w-0">
+              <h4 className="font-bold text-sm text-white leading-tight flex items-center gap-1.5 truncate">
+                <span>{pedido.nome_cliente}</span>
+                {isDelayed && <Flame className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" />}
               </h4>
               {pedido.entregador_nome && (
-                <span className="text-[10px] font-mono text-purple-300 block">
-                  🛵 {pedido.entregador_nome}
+                <span className="text-[11px] font-mono text-purple-300 font-semibold block mt-0.5">
+                  🛵 Motoboy: {pedido.entregador_nome}
                 </span>
               )}
             </div>
           </div>
 
-          {pedido.codigo_confirmacao && (
-            <div className="px-2 py-1 bg-amber-500/15 border border-amber-500/30 rounded-lg text-[10px] font-bold text-amber-300 flex items-center gap-1">
-              <span>PIN:</span>
-              <strong className="text-xs font-mono font-black text-amber-200">{pedido.codigo_confirmacao}</strong>
-            </div>
-          )}
+          <div className="flex items-center gap-1 shrink-0">
+            {waUrl && (
+              <a
+                href={waUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="p-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs transition-colors"
+                title="Abrir conversa no WhatsApp"
+              >
+                <Phone className="w-3.5 h-3.5" />
+              </a>
+            )}
+
+            {pedido.codigo_confirmacao && (
+              <div className="px-2 py-1 bg-amber-500/15 border border-amber-500/30 rounded-xl text-[10px] font-bold text-amber-300 flex items-center gap-1 shadow-sm">
+                <span className="text-slate-400">PIN:</span>
+                <strong className="text-xs font-mono font-black text-amber-200">{pedido.codigo_confirmacao}</strong>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* ALERTA VISUAL DE BEBIDAS E SOBREMESAS */}
@@ -156,13 +177,13 @@ export const OrderCard: React.FC<OrderCardProps> = ({
           return (
             <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
               {analysis.hasBeverage && (
-                <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-black uppercase flex items-center gap-1 shadow-sm animate-pulse">
-                  🥤 INCLUI BEBIDA
+                <span className="px-2.5 py-0.5 rounded-lg bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-extrabold uppercase flex items-center gap-1 shadow-sm">
+                  🥤 BEBIDA GELADA
                 </span>
               )}
               {analysis.hasDessert && (
-                <span className="px-2 py-0.5 rounded-md bg-pink-500/20 text-pink-300 border border-pink-500/40 text-[10px] font-black uppercase flex items-center gap-1 shadow-sm">
-                  🍰 INCLUI SOBREMESA
+                <span className="px-2.5 py-0.5 rounded-lg bg-gradient-to-r from-pink-500/20 to-rose-500/20 text-pink-300 border border-pink-500/40 text-[10px] font-extrabold uppercase flex items-center gap-1 shadow-sm">
+                  🍰 SOBREMESA
                 </span>
               )}
             </div>
@@ -170,11 +191,22 @@ export const OrderCard: React.FC<OrderCardProps> = ({
         })()}
 
         {/* Endereço de Entrega */}
-        <div className="flex items-start gap-2 text-xs text-slate-300">
-          <MapPin className="w-4 h-4 text-rose-400 mt-0.5 shrink-0" />
-          <p className="line-clamp-2 leading-relaxed bg-slate-900/40 p-2 rounded-lg border border-slate-800 font-mono text-[11px]">
-            {pedido.endereco_entrega}
-          </p>
+        <div className="relative group/addr bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/80">
+          <div className="flex items-start justify-between gap-2 text-xs text-slate-300">
+            <div className="flex items-start gap-2 min-w-0">
+              <MapPin className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              <p className="line-clamp-2 leading-snug font-mono text-[11px] text-slate-200">
+                {pedido.endereco_entrega}
+              </p>
+            </div>
+            <button
+              onClick={handleCopyAddress}
+              className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors shrink-0"
+              title="Copiar Endereço"
+            >
+              {copiedAddress ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -182,22 +214,22 @@ export const OrderCard: React.FC<OrderCardProps> = ({
       <div className="mt-3">
         <button
           onClick={() => setShowItems(!showItems)}
-          className="w-full flex items-center justify-between text-xs text-slate-400 hover:text-slate-200 py-1 transition-colors"
+          className="w-full flex items-center justify-between text-xs text-slate-400 hover:text-white py-1 px-1 rounded-lg hover:bg-slate-800/50 transition-colors"
         >
-          <span className="font-medium">
-            {Array.isArray(pedido.itens) ? `${pedido.itens.length} item(ns)` : 'Itens do pedido'}
+          <span className="font-semibold text-[11px]">
+            {Array.isArray(pedido.itens) ? `${pedido.itens.length} item(ns) na comanda` : 'Itens do pedido'}
           </span>
           {showItems ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
         </button>
 
         {showItems && Array.isArray(pedido.itens) && (
-          <div className="mt-1.5 bg-slate-900/80 rounded-lg p-2.5 space-y-1.5 text-xs border border-slate-700/50">
+          <div className="mt-1.5 bg-slate-950/80 rounded-xl p-2.5 space-y-1.5 text-xs border border-slate-800/80 shadow-inner max-h-40 overflow-y-auto">
             {pedido.itens.map((item, idx) => (
-              <div key={idx} className="flex justify-between items-center text-slate-300">
+              <div key={idx} className="flex justify-between items-center text-slate-300 border-b border-slate-800/40 last:border-0 pb-1 last:pb-0">
                 <span className="truncate pr-2">
-                  <span className="font-semibold text-sky-400">{item.quantidade}x</span> {item.nome}
+                  <span className="font-extrabold text-sky-400">{item.quantidade}x</span> {item.nome}
                 </span>
-                <span className="text-slate-400 font-mono text-[11px] shrink-0">
+                <span className="text-slate-400 font-mono text-[11px] shrink-0 font-medium">
                   {formatCurrency((item.preco_unitario || 0) * (item.quantidade || 1))}
                 </span>
               </div>
@@ -207,26 +239,26 @@ export const OrderCard: React.FC<OrderCardProps> = ({
       </div>
 
       {/* Rodapé: Valor Total & Ações de Transição de Status */}
-      <div className="mt-4 pt-3 border-t border-slate-700/60 flex items-center justify-between gap-2">
+      <div className="mt-3.5 pt-2.5 border-t border-slate-800/80 flex items-center justify-between gap-2">
         <div>
-          <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">Total</span>
-          <span className="text-base font-bold text-emerald-400 font-mono">
+          <span className="text-[9px] uppercase font-extrabold text-slate-400 tracking-wider block">Total</span>
+          <span className="text-base font-black text-emerald-400 font-mono tracking-tight">
             {formatCurrency(pedido.valor_total)}
           </span>
         </div>
 
         {/* Botões de Ação Dinâmicos */}
         <div className="flex items-center gap-1.5">
-          {pedido.status === 'pendente' && (
+          {(pedido.status === 'pendente' || pedido.status === 'preparo') && (
             <button
               disabled={loading}
-              onClick={() => handleStatusChange('preparando')}
-              className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-white text-xs font-semibold shadow transition-all disabled:opacity-50 ${
-                isDelayed ? 'bg-rose-600 hover:bg-rose-500 animate-bounce' : 'bg-blue-600 hover:bg-blue-500'
+              onClick={() => handleStatusChange('pronto')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-white text-xs font-bold shadow-md transition-all disabled:opacity-50 hover:scale-102 ${
+                isDelayed ? 'bg-rose-600 hover:bg-rose-500 animate-pulse' : 'bg-emerald-600 hover:bg-emerald-500'
               }`}
-              title="Iniciar Preparo do Pedido"
+              title="Marcar como Pronto para Expedição"
             >
-              <span>Preparar</span>
+              <span>Concluir</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           )}
@@ -236,7 +268,7 @@ export const OrderCard: React.FC<OrderCardProps> = ({
               <button
                 disabled={loading}
                 onClick={() => handleStatusChange('pendente')}
-                className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs transition-colors"
+                className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-colors"
                 title="Voltar para Pendente"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
@@ -244,7 +276,7 @@ export const OrderCard: React.FC<OrderCardProps> = ({
               <button
                 disabled={loading}
                 onClick={() => handleStatusChange('pronto')}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-white text-xs font-semibold shadow transition-all disabled:opacity-50 ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-white text-xs font-bold shadow-md transition-all disabled:opacity-50 hover:scale-102 ${
                   isDelayed ? 'bg-rose-600 hover:bg-rose-500' : 'bg-emerald-600 hover:bg-emerald-500'
                 }`}
                 title="Marcar como Pronto"
@@ -260,7 +292,7 @@ export const OrderCard: React.FC<OrderCardProps> = ({
               <button
                 disabled={loading}
                 onClick={() => handleStatusChange('preparando')}
-                className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs transition-colors"
+                className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-colors"
                 title="Voltar para Preparando"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
@@ -268,7 +300,7 @@ export const OrderCard: React.FC<OrderCardProps> = ({
               <button
                 disabled={loading}
                 onClick={() => handleStatusChange('despachado')}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-medium shadow transition-all disabled:opacity-50"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-md transition-all disabled:opacity-50 hover:scale-102"
                 title="Despachar Pedido"
               >
                 <span>Despachar</span>
@@ -281,3 +313,4 @@ export const OrderCard: React.FC<OrderCardProps> = ({
     </div>
   );
 };
+
