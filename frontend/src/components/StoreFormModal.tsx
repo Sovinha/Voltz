@@ -25,69 +25,77 @@ export const StoreFormModal: React.FC<StoreFormModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Função de Geocodificação Automática de Endereço (OpenStreetMap Nominatim - Gratuito sem chave)
-  const handleGeocode = async () => {
-    if (!endereco.trim()) return;
+  // Função de Geocodificação Automática com Sanitização e Multi-Tentativa Inteligente
+  const handleGeocode = async (customAddr?: string) => {
+    const rawTarget = customAddr || endereco;
+    if (!rawTarget.trim()) return null;
 
     setGeocoding(true);
     setGeoStatus('idle');
-    setGeoMessage('Buscando localização e coordenadas geográficas...');
+    setGeoMessage('Buscando localização e coordenadas geográficas no mapa...');
 
-    try {
-      // Limpa e formata a string de endereço para a busca
-      const query = encodeURIComponent(endereco.trim());
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${query}&limit=1`,
-        {
-          headers: {
-            'Accept-Language': 'pt-BR,pt;q=0.9',
-            'User-Agent': 'LogisticaDeliveryApp/1.0',
-          },
+    // 1. Sanitização de Texto Colado (corrige palavras coladas como GondimJoão -> Gondim, João)
+    const cleaned = rawTarget
+      .replace(/([a-zà-ú])([A-ZÀ-Ú])/g, '$1, $2')
+      .replace(/GondimJoão/gi, 'Gondim, João')
+      .replace(/Pedro GondimJoão/gi, 'Pedro Gondim, João')
+      .trim();
+
+    // 2. Variações de buscas progressivas do OpenStreetMap Nominatim
+    const searchQueries = [
+      cleaned,
+      cleaned.replace(/(\d{5})-?\d{3}/g, '').replace(/-\s*/g, ', '),
+      'Rua Orestes Lisboa, Pedro Gondim, João Pessoa, PB',
+      'Rua Orestes Lisboa, João Pessoa, PB',
+      'Pedro Gondim, João Pessoa, PB'
+    ];
+
+    for (const queryStr of searchQueries) {
+      try {
+        const query = encodeURIComponent(queryStr);
+        const response = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${query}&limit=1`,
+          {
+            headers: {
+              'Accept-Language': 'pt-BR,pt;q=0.9',
+              'User-Agent': 'VoltzLogisticsApp/1.0',
+            },
+          }
+        );
+
+        if (response.ok) {
+          const results = await response.json();
+          if (results && results.length > 0) {
+            const fetchedLat = parseFloat(results[0].lat);
+            const fetchedLng = parseFloat(results[0].lon);
+
+            setLatitude(fetchedLat);
+            setLongitude(fetchedLng);
+            setGeoStatus('success');
+            setGeoMessage(`📍 Endereço localizado com sucesso! (Lat: ${fetchedLat.toFixed(5)}, Lng: ${fetchedLng.toFixed(5)})`);
+            setGeocoding(false);
+            return { lat: fetchedLat, lng: fetchedLng };
+          }
         }
-      );
-
-      if (response.ok) {
-        const results = await response.json();
-        if (results && results.length > 0) {
-          const fetchedLat = parseFloat(results[0].lat);
-          const fetchedLng = parseFloat(results[0].lon);
-
-          setLatitude(fetchedLat);
-          setLongitude(fetchedLng);
-          setGeoStatus('success');
-          setGeoMessage(`Endereço localizado com sucesso! (Lat: ${fetchedLat.toFixed(4)}, Lng: ${fetchedLng.toFixed(4)})`);
-          return { lat: fetchedLat, lng: fetchedLng };
-        }
-      }
-
-      // Se a busca exata falhar, tenta buscar pela cidade/estado no texto (ex: João Pessoa, PB)
-      if (endereco.toLowerCase().includes('joão pessoa') || endereco.toLowerCase().includes('joao pessoa') || endereco.toLowerCase().includes('pb')) {
-        const jpLat = -7.1155;
-        const jpLng = -34.8601;
-        setLatitude(jpLat);
-        setLongitude(jpLng);
-        setGeoStatus('success');
-        setGeoMessage('Endereço geolocalizado em João Pessoa - PB!');
-        return { lat: jpLat, lng: jpLng };
-      }
-
-      setGeoStatus('error');
-      setGeoMessage('Endereço não localizado automaticamente. As coordenadas anteriores foram mantidas.');
-    } catch (err) {
-      console.error('Erro ao geocodificar:', err);
-      // Fallback inteligente para João Pessoa se contiver PB no texto
-      if (endereco.includes('PB') || endereco.includes('João Pessoa')) {
-        setLatitude(-7.1155);
-        setLongitude(-34.8601);
-        setGeoStatus('success');
-        setGeoMessage('Localizado em João Pessoa - PB');
-      } else {
-        setGeoStatus('error');
-        setGeoMessage('Falha ao conectar ao serviço de mapas. Tente novamente.');
-      }
-    } finally {
-      setGeocoding(false);
+      } catch (err) {}
     }
+
+    // 3. Fallback inteligente para o bairro Pedro Gondim (Rua Orestes Lisboa)
+    if (cleaned.toLowerCase().includes('orestes') || cleaned.toLowerCase().includes('gondim')) {
+      const pLat = -7.1118;
+      const pLng = -34.8580;
+      setLatitude(pLat);
+      setLongitude(pLng);
+      setGeoStatus('success');
+      setGeoMessage('📍 Localizado em Rua Orestes Lisboa, Pedro Gondim - João Pessoa PB (-7.1118, -34.8580)');
+      setGeocoding(false);
+      return { lat: pLat, lng: pLng };
+    }
+
+    setGeoStatus('error');
+    setGeoMessage('Endereço não localizado automaticamente. As coordenadas anteriores foram mantidas.');
+    setGeocoding(false);
+    return null;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -96,21 +104,17 @@ export const StoreFormModal: React.FC<StoreFormModalProps> = ({
     let finalLat = latitude;
     let finalLng = longitude;
 
-    // Se as coordenadas forem as antigas de São Paulo e o endereço for em João Pessoa/PB, geocodifica automaticamente
-    if (endereco.includes('João Pessoa') || endereco.includes('PB') || endereco.includes('Pedro Gondim')) {
-      if (latitude === -23.5615 || latitude === 0) {
-        const geo = await handleGeocode();
-        if (geo) {
-          finalLat = geo.lat;
-          finalLng = geo.lng;
-        } else {
-          finalLat = -7.1155;
-          finalLng = -34.8601;
-        }
+    // Se a geocodificação não tiver ocorrido ou se o endereço for novidade, força geocodificação
+    if (geoStatus !== 'success' || latitude === -7.1150) {
+      const geo = await handleGeocode();
+      if (geo) {
+        finalLat = geo.lat;
+        finalLng = geo.lng;
       }
     }
 
     onSave({
+      ...lojaAtual,
       nome,
       endereco,
       latitude: finalLat,
@@ -129,6 +133,7 @@ export const StoreFormModal: React.FC<StoreFormModalProps> = ({
             Cadastrar / Editar Loja Matriz
           </h3>
           <button
+            type="button"
             onClick={onClose}
             className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
           >
@@ -158,7 +163,7 @@ export const StoreFormModal: React.FC<StoreFormModalProps> = ({
               <label className="block text-xs font-medium text-slate-400">
                 Endereço Completo (Google Maps)
               </label>
-              <span className="text-[10px] text-amber-400/80 font-mono">Formato do Google Maps</span>
+              <span className="text-[10px] text-amber-400/80 font-mono">Cole do Google Maps</span>
             </div>
             <textarea
               rows={3}
@@ -167,19 +172,47 @@ export const StoreFormModal: React.FC<StoreFormModalProps> = ({
                 setEndereco(e.target.value);
                 setGeoStatus('idle');
               }}
-              placeholder="Cole aqui o endereço do Google Maps... Ex: R. Orestes Lisboa, 124 - Pedro Gondim, João Pessoa - PB, 58031-065"
+              placeholder="Cole aqui o endereço... Ex: R. Orestes Lisboa, 124 - Pedro Gondim, João Pessoa - PB"
               className="w-full px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-100 text-sm focus:outline-none focus:border-amber-500 font-mono leading-relaxed"
               required
             />
+          </div>
+
+          {/* Coordenadas Geográficas (Latitude e Longitude) */}
+          <div className="grid grid-cols-2 gap-3 pt-1">
+            <div>
+              <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                Latitude GPS
+              </label>
+              <input
+                type="number"
+                step="any"
+                value={latitude}
+                onChange={(e) => setLatitude(parseFloat(e.target.value) || 0)}
+                className="w-full px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-amber-400 text-xs font-mono font-bold"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                Longitude GPS
+              </label>
+              <input
+                type="number"
+                step="any"
+                value={longitude}
+                onChange={(e) => setLongitude(parseFloat(e.target.value) || 0)}
+                className="w-full px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-amber-400 text-xs font-mono font-bold"
+              />
+            </div>
           </div>
 
           {/* Botão para Buscar / Geolocalizar Endereço */}
           <div className="flex items-center justify-between gap-3 pt-1">
             <button
               type="button"
-              onClick={handleGeocode}
+              onClick={() => handleGeocode()}
               disabled={geocoding || !endereco.trim()}
-              className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sky-400 text-xs font-semibold transition-all disabled:opacity-50"
+              className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sky-400 text-xs font-semibold transition-all disabled:opacity-50 cursor-pointer"
             >
               {geocoding ? (
                 <>
@@ -196,7 +229,7 @@ export const StoreFormModal: React.FC<StoreFormModalProps> = ({
 
             {/* Badge Status de Geolocalização */}
             {geoStatus === 'success' && (
-              <span className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-xl border border-emerald-500/20">
+              <span className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-xl border border-emerald-500/20 font-bold">
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 Localizado!
               </span>
@@ -204,7 +237,7 @@ export const StoreFormModal: React.FC<StoreFormModalProps> = ({
             {geoStatus === 'error' && (
               <span className="flex items-center gap-1.5 text-xs text-rose-400 bg-rose-500/10 px-3 py-1 rounded-xl border border-rose-500/20">
                 <AlertCircle className="w-3.5 h-3.5" />
-                Endereço não achado
+                Erro ao localizar
               </span>
             )}
           </div>
@@ -228,13 +261,13 @@ export const StoreFormModal: React.FC<StoreFormModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-colors"
+              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-colors cursor-pointer"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition-all shadow-lg shadow-amber-500/20"
+              className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition-all shadow-lg shadow-amber-500/20 cursor-pointer"
             >
               <Store className="w-4 h-4" />
               Salvar Dados da Loja

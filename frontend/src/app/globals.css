@@ -23,24 +23,92 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.6);
+  background: rgba(9, 13, 22, 0.8);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(51, 65, 85, 0.8);
+  background: rgba(30, 41, 59, 0.9);
   border-radius: 9999px;
+  border: 1px solid rgba(6, 182, 212, 0.2);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(71, 85, 105, 1);
+  background: rgba(6, 182, 212, 0.5);
 }
 
-/* Filtro de Modo Escuro Premium 100% Gratuito e sem marca d'água */
-.dark-tiles-filter {
-  filter: brightness(0.65) invert(1) contrast(2.8) hue-rotate(200deg) saturate(0.35) !important;
+/* Glassmorphism e Efeitos de Brilho Turquoise & Gold */
+.glow-turquoise {
+  box-shadow: 0 0 25px -4px rgba(6, 182, 212, 0.35);
 }
 
-/* Removendo contorno/moldura branca padrão dos Popups do Leaflet */
+.glow-gold {
+  box-shadow: 0 0 25px -4px rgba(245, 158, 11, 0.4);
+}
+
+.glow-emerald {
+  box-shadow: 0 0 25px -4px rgba(16, 185, 129, 0.35);
+}
+
+.glow-rose {
+  box-shadow: 0 0 25px -4px rgba(244, 63, 94, 0.4);
+}
+
+.bg-glass-card {
+  background: rgba(15, 23, 42, 0.78);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.bg-glass-card-hover:hover {
+  background: rgba(30, 41, 59, 0.85);
+}
+
+/* Animações Personalizadas */
+@keyframes pulse-gold {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(245, 158, 11, 0);
+  }
+}
+
+@keyframes pulse-turquoise {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(6, 182, 212, 0);
+  }
+}
+
+.animate-pulse-gold {
+  animation: pulse-gold 2s infinite;
+}
+
+.animate-pulse-turquoise {
+  animation: pulse-turquoise 2s infinite;
+}
+
+/* Leaflet Layout & Dark Mode Fix */
+#integrated-map-container,
+.leaflet-container {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 100% !important;
+  background: #090d16 !important;
+  outline: none !important;
+  position: relative !important;
+}
+
+.dark-tiles-filter,
+.leaflet-tile-pane img,
+.leaflet-tile-container img,
+img.leaflet-tile {
+  filter: invert(100%) hue-rotate(180deg) brightness(85%) contrast(95%) !important;
+  -webkit-filter: invert(100%) hue-rotate(180deg) brightness(85%) contrast(95%) !important;
+}
+
 .custom-context-popup .leaflet-popup-content-wrapper,
 .leaflet-popup-content-wrapper {
   background: transparent !important;
@@ -60,3 +128,4 @@ body {
 .leaflet-popup-tip-container {
   display: none !important;
 }
+

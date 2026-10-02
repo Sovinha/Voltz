@@ -31,14 +31,44 @@ CORS(app)  # Permite requisições do frontend React / Next.js
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 
-# Google Maps Geocoding API Key (opcional - ativa precisão máxima de porta/número exato)
-# Deve começar com "AIza" (formato de chave Google Maps)
+# Google Maps Geocoding & Directions API Key (opcional - ativa precisão máxima de porta e rotas oficiais)
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
 if GOOGLE_MAPS_API_KEY and not GOOGLE_MAPS_API_KEY.startswith("AIza"):
     print(f"[AVISO] GOOGLE_MAPS_API_KEY não parece ser uma chave Google válida (deve começar com 'AIza'). Ignorando.")
     GOOGLE_MAPS_API_KEY = ""
 if GOOGLE_MAPS_API_KEY:
-    print("[OK] Google Maps Geocoding API habilitada — precisão máxima de porta/número exato ativada!")
+    print("[OK] Google Maps Platform API habilitada — Geocoding & Directions ativados!")
+
+def set_google_maps_api_key(new_key: str):
+    global GOOGLE_MAPS_API_KEY
+    clean_key = new_key.strip()
+    if clean_key and not clean_key.startswith("AIza"):
+        return False, "A chave da API do Google Maps deve começar com 'AIza'."
+    GOOGLE_MAPS_API_KEY = clean_key
+    
+    # Atualiza arquivo .env local para persistência
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    lines = []
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            
+    key_exists = False
+    new_lines = []
+    for line in lines:
+        if line.startswith("GOOGLE_MAPS_API_KEY="):
+            new_lines.append(f"GOOGLE_MAPS_API_KEY={clean_key}\n")
+            key_exists = True
+        else:
+            new_lines.append(line)
+            
+    if not key_exists:
+        new_lines.append(f"GOOGLE_MAPS_API_KEY={clean_key}\n")
+        
+    with open(env_path, "w", encoding="utf-8") as f:
+        f.writelines(new_lines)
+        
+    return True, "Chave da API do Google Maps atualizada e salva com sucesso!"
 
 if not SUPABASE_URL or not SUPABASE_KEY or "seu-projeto" in SUPABASE_URL or "sua-chave" in SUPABASE_KEY:
     supabase = None
@@ -339,6 +369,113 @@ def get_osrm_status():
             "osrm_base_url": OSRM_BASE_URL,
             "error": data.get("error")
         }), 502
+
+
+@app.route("/api/config/google-maps", methods=["GET", "POST"])
+def manage_google_maps_config():
+    """
+    Endpoint de Gerenciamento da API do Google Maps Platform.
+    Exibe a cota mensal gratuita ($200.00), o consumo estimado ($0.00 faturado) e permite ativar a chave.
+    """
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        key_input = body.get("google_maps_api_key", "").strip()
+        success, msg = set_google_maps_api_key(key_input)
+        if not success:
+            return jsonify({"error": msg}), 400
+
+    conn = get_db_connection()
+    cache_count = 0
+    try:
+        row = conn.execute("SELECT COUNT(*) FROM geocode_cache").fetchone()
+        if row:
+            cache_count = row[0]
+    except Exception:
+        pass
+    conn.close()
+
+    masked_key = ""
+    if GOOGLE_MAPS_API_KEY:
+        masked_key = GOOGLE_MAPS_API_KEY[:6] + "..." + GOOGLE_MAPS_API_KEY[-4:] if len(GOOGLE_MAPS_API_KEY) > 10 else "***"
+
+    # Cálculo da Simulação Gratuita (Estudo de Caso 143 pedidos/dia)
+    est_geocodes_per_day = 143
+    est_routes_per_day = 48
+    cost_geocoding_usd = (est_geocodes_per_day * 0.005)
+    cost_directions_usd = (est_routes_per_day * 0.01)
+    daily_cost_usd = round(cost_geocoding_usd + cost_directions_usd, 2)
+    monthly_cost_usd = round(daily_cost_usd * 30, 2)
+    free_credit_usd = 200.00
+    final_cost_to_user = 0.00 # $200.00 de crédito cobre $35.70 totalmente
+
+    return jsonify({
+        "status": "online",
+        "google_maps_enabled": bool(GOOGLE_MAPS_API_KEY),
+        "api_key_configured": bool(GOOGLE_MAPS_API_KEY),
+        "api_key_masked": masked_key,
+        "geocode_cache_entries": cache_count,
+        "pricing_simulation": {
+            "monthly_quota_credit_usd": free_credit_usd,
+            "estimated_daily_cost_usd": daily_cost_usd,
+            "estimated_monthly_cost_usd": monthly_cost_usd,
+            "final_billed_cost_usd": final_cost_to_user,
+            "monthly_remaining_credit_usd": round(free_credit_usd - monthly_cost_usd, 2),
+            "recommendation": "Excelente! O volume do restaurante consome apenas $35,70 dos $200,00 de crédito mensal gratuito da Google Maps Platform. Sua fatura final será R$ 0,00."
+        }
+    }), 200
+
+
+@app.route("/api/google/directions", methods=["POST", "GET"])
+def get_google_maps_directions():
+    """
+    Roteirização Direta via Google Maps Directions API (Waypoints Otimizados).
+    Recebe origem, destino e waypoints e retorna a rota exata em ruas reais.
+    """
+    if not GOOGLE_MAPS_API_KEY:
+        return jsonify({
+            "error": "GOOGLE_MAPS_API_KEY não está configurada no backend. Use o provedor OSRM em /api/route ou cadastre sua chave em /api/config/google-maps."
+        }), 400
+
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        origin = body.get("origin")
+        destination = body.get("destination")
+        waypoints = body.get("waypoints", [])
+        optimize = body.get("optimize", True)
+    else:
+        origin = request.args.get("origin")
+        destination = request.args.get("destination")
+        raw_wp = request.args.get("waypoints", "")
+        waypoints = raw_wp.split(";") if raw_wp else []
+        optimize = request.args.get("optimize", "true").lower() == "true"
+
+    if not origin or not destination:
+        return jsonify({"error": "Parâmetros 'origin' e 'destination' são obrigatórios"}), 400
+
+    try:
+        params = {
+            "origin": origin,
+            "destination": destination,
+            "key": GOOGLE_MAPS_API_KEY,
+            "mode": "driving",
+            "language": "pt-BR",
+            "region": "br"
+        }
+        if waypoints:
+            prefix = "optimize:true|" if optimize else ""
+            params["waypoints"] = prefix + "|".join(waypoints)
+
+        r = requests.get("https://maps.googleapis.com/maps/api/directions/json", params=params, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            if data.get("status") == "OK":
+                return jsonify(data), 200
+            else:
+                return jsonify({"error": f"Google Maps Directions API status: {data.get('status')}", "details": data.get("error_message")}), 400
+        else:
+            return jsonify({"error": f"Erro HTTP {r.status_code} na Google Maps API"}), 502
+    except Exception as e:
+        return jsonify({"error": f"Exceção ao consultar Google Maps Directions: {str(e)}"}), 500
 
 
 @app.route("/api/route", methods=["GET"])
@@ -2538,6 +2675,87 @@ Retorne EXCLUSIVAMENTE em formato JSON:
         print(f"[AUTO-DESPACHO ERRO] Falha ao executar despacho automático: {e}")
         return jsonify({"status": "error", "message": f"Erro no despacho automático: {str(e)}"}), 500
 
+
+@app.route("/api/lojas", methods=["GET"])
+def get_lojas():
+    """
+    Retorna a lista de lojas cadastradas (incluindo a loja principal).
+    """
+    try:
+        conn = get_db_connection()
+        rows = conn.execute("SELECT * FROM lojas WHERE ativa = 1").fetchall()
+        conn.close()
+        lojas = [dict(r) for r in rows]
+        if not lojas:
+            lojas = [{
+                "id": "loja_matriz",
+                "nome": "Filipéia Trattoria - Pedro Gondim",
+                "endereco": "R. Manuel França, 56 - Pedro Gondim, João Pessoa - PB",
+                "latitude": -7.1150,
+                "longitude": -34.8630,
+                "telefone": "(83) 99999-0000",
+                "ativa": 1
+            }]
+        return jsonify(lojas), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/lojas/<loja_id>", methods=["PUT", "POST"])
+def update_loja(loja_id):
+    """
+    Atualiza o endereço, nome e coordenadas da loja principal.
+    """
+    try:
+        data = request.get_json() or {}
+        nome = data.get("nome", "Loja Matriz")
+        endereco = data.get("endereco", "")
+        latitude = float(data.get("latitude", -7.1150))
+        longitude = float(data.get("longitude", -34.8630))
+        telefone = data.get("telefone", "")
+
+        conn = get_db_connection()
+        conn.execute("""
+            INSERT INTO lojas (id, nome, endereco, latitude, longitude, telefone, ativa, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                nome = excluded.nome,
+                endereco = excluded.endereco,
+                latitude = excluded.latitude,
+                longitude = excluded.longitude,
+                telefone = excluded.telefone
+        """, (loja_id, nome, endereco, latitude, longitude, telefone, datetime.now().isoformat()))
+        conn.commit()
+        conn.close()
+
+        if supabase:
+            try:
+                supabase.table("lojas").upsert({
+                    "id": loja_id,
+                    "nome": nome,
+                    "endereco": endereco,
+                    "latitude": latitude,
+                    "longitude": longitude,
+                    "telefone": telefone,
+                    "ativa": True
+                }).execute()
+            except Exception:
+                pass
+
+        return jsonify({
+            "status": "success",
+            "message": "Endereço da loja atualizado com sucesso!",
+            "loja": {
+                "id": loja_id,
+                "nome": nome,
+                "endereco": endereco,
+                "latitude": latitude,
+                "longitude": longitude,
+                "telefone": telefone
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":

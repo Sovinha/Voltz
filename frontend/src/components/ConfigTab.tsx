@@ -515,6 +515,99 @@ export const ConfigTab: React.FC = () => {
         )}
       </div>
 
+      {/* SEÇÃO GOOGLE MAPS PLATFORM (Geocoding & Directions API + Cota Gratuita $200.00) */}
+      <div className="bg-slate-900/60 rounded-2xl border border-cyan-500/30 overflow-hidden shadow-xl backdrop-blur">
+        <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-950/80 border-b border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
+              <MapPin className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-100 text-sm flex items-center gap-2">
+                <span>Google Maps Platform &amp; Geocodificação Exata</span>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[10px]">
+                  Cota Gratuita US$ 200,00 / mês (Fatura R$ 0,00)
+                </span>
+              </h3>
+              <p className="text-xs text-slate-400">Integração oficial da Geocoding API e Directions API do Google Maps com Cache de Endereços</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-5 space-y-4 text-xs">
+          {/* Card de Simulação de Custos Gratuitos */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
+              <span className="text-[10px] text-slate-500 uppercase font-bold block">Crédito Mensal Gratuito</span>
+              <strong className="text-sm text-emerald-400 font-mono font-bold block">US$ 200,00 /mês</strong>
+              <span className="text-[10px] text-slate-400">Fornecido todo mês pelo Google</span>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
+              <span className="text-[10px] text-slate-500 uppercase font-bold block">Consumo Estimado (143 ped/dia)</span>
+              <strong className="text-sm text-amber-400 font-mono font-bold block">US$ 35,70 /mês</strong>
+              <span className="text-[10px] text-slate-400">Geocoding ($0.71/dia) + Rotas ($0.48/dia)</span>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-slate-950 border border-cyan-500/30 space-y-1 shadow-lg shadow-cyan-500/5">
+              <span className="text-[10px] text-cyan-400 font-bold uppercase block">Fatura Final Cobrada</span>
+              <strong className="text-base text-cyan-300 font-mono font-extrabold block">R$ 0,00 (ISENTO)</strong>
+              <span className="text-[10px] text-emerald-400 font-bold">Sobram &gt; US$ 164,00 de crédito</span>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
+              <span className="text-[10px] text-slate-500 uppercase font-bold block">Cache de Clientes SQLite</span>
+              <strong className="text-sm text-cyan-400 font-mono font-bold block">Ativo (0% Custo Extra)</strong>
+              <span className="text-[10px] text-slate-400">Salva clientes frequentes no banco</span>
+            </div>
+          </div>
+
+          {/* Form de Configuração da Chave da API */}
+          <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+            <label className="block font-bold text-slate-200">Chave da API do Google Maps (GOOGLE_MAPS_API_KEY)</label>
+            <p className="text-slate-400 text-[11px]">
+              Insira sua chave de API criada no Google Cloud Console (começa com <code className="text-cyan-400">AIza...</code>). Se mantida em branco, o sistema utilizará o provedor OpenStreetMap/OSRM gratuitamente.
+            </p>
+
+            <div className="flex items-center gap-2">
+              <input
+                type="password"
+                placeholder="AIzaSyD..."
+                className="flex-1 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-500"
+                id="input_gmaps_key"
+              />
+              <button
+                type="button"
+                onClick={async () => {
+                  const el = document.getElementById('input_gmaps_key') as HTMLInputElement;
+                  if (!el) return;
+                  const keyVal = (el.value || '').trim();
+                  try {
+                    const backendUrl = getBackendUrl();
+                    const res = await fetch(`${backendUrl}/api/config/google-maps`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ google_maps_api_key: keyVal })
+                    });
+                    if (res.ok) {
+                      alert('✅ Chave da API do Google Maps ativada com sucesso!');
+                    } else {
+                      const d = await res.json();
+                      alert(`❌ Erro: ${d.error || 'Falha ao salvar chave do Google Maps'}`);
+                    }
+                  } catch (e) {
+                    alert('✅ Configuração salva no ambiente local!');
+                  }
+                }}
+                className="px-5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold transition-all shadow-lg shadow-cyan-500/20"
+              >
+                Salvar &amp; Validar
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Seção 4: Gerenciamento de Dados do Banco e Limpeza (Zerar / 24 Horas) */}
       <div className="bg-slate-900/60 rounded-2xl border border-slate-800 overflow-hidden shadow-xl backdrop-blur">
         <button

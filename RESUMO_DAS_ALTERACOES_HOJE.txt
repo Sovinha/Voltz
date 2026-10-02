@@ -1,0 +1,60 @@
+================================================================================
+                    VOLTZ LOGISTICS - RESUMO DE ATUALIZAÇÕES
+================================================================================
+Data: 01/10/2026 - 02/10/2026
+Desenvolvido por: Antigravity AI (Google DeepMind Team) & Usuário Voltz
+Status: 100% Compilado, Testado e Deployado no Servidor (143.95.215.217:3002)
+================================================================================
+
+1. MAPA INTERATIVO & POPUPS DE PEDIDO (OBSIDIAN GLASSMORPHISM)
+--------------------------------------------------------------------------------
+- Pop-ups de Pedidos Redesenhados: Card dark obsidian estilizado ao clicar no pin.
+- Mudança de Status Direct In-Pin: Alternância de status (Pendente ➔ Em Rota ➔ Entregue).
+- Atribuição Rápida de Entregador: Selector de motoboys com contador de carga (ex: Anderson 1/4).
+- Montador de Rota em Lote (Batch): Adição/remoção de pedidos em rotas personalizadas.
+- Edição Direta do Pedido: Botão para abrir modal de edição completa do pedido direto no mapa.
+- Link de Rastreio Rápido: Cópia do link público de rastreamento para o WhatsApp do cliente.
+- Remoção do Zoom Automático Invasivo: Câmera estável no mapa sem pulos indesejados.
+
+2. LIMITE MÁXIMO DE ENTREGAS POR MOTOBOY (MAX/MOTO)
+--------------------------------------------------------------------------------
+- Seletor de Carga (Max/Moto): Adicionado na barra de ferramentas (1 a 8 entregas, com padrão 4 recomendadas ou Sem Limite).
+- Flexibilidade do Operador: O operador decide o limite automático e pode incluir entregas a mais manualmente sem restrições.
+- Integração com a IA DeepSeek Maestro: O motor de despacho considera a trava máxima ao criar rotas.
+
+3. INTELIGÊNCIA DE ROTAS VIA AV. EPITÁCIO PESSOA & RUAS REAIS (OSRM)
+--------------------------------------------------------------------------------
+- Priorização de Vias Arteriais: Correção de rotas que faziam voltas em bairros residenciais. O sistema agora conecta as rotas diretamente à Av. Epitácio Pessoa e Av. Ruy Carneiro.
+- Via-Points Automáticos: Inserção de waypoints estratégicos (-34.8550, -7.1215) para forçar o fluxo pelas grandes avenidas.
+- Multi-Provedor Contingencial: Troca automática de mirrors OSRM em caso de timeout.
+
+4. SEGMETAÇÃO DINÂMICA DE TRÂNSITO ESTILO GOOGLE MAPS (CUSTO R$ 0,00)
+--------------------------------------------------------------------------------
+- Gradiente Multicolorido de Tráfego: Linhas no mapa segmentadas por fluxo de trânsito:
+  * Verde Emerald / Ciano: Trecho de tráfego livre.
+  * Laranja Vivo: Trecho em grandes avenidas (Epitácio Pessoa, BR-230, Ruy Carneiro) com fluxo moderado/horário de pico.
+  * Vermelho Neon: Gargalos de retenção e pedidos com SLA crítico (>15 min).
+- Custo Zero R$: Processado via motor vetorial no cliente, sem requisições pagas de API.
+
+5. TROCA DE ENDEREÇO DA LOJA PRINCIPAL (HUB MATRIZ)
+--------------------------------------------------------------------------------
+- Botão "Trocar Loja" no Cabeçalho & Barra de Ferramentas: Edição rápida da Loja Matriz.
+- Geocodificação Automática Inteligente com Sanitização:
+  * Corrige automaticamente textos colados do Google Maps (ex: "Pedro GondimJoão Pessoa" ➔ "Pedro Gondim, João Pessoa").
+  * Mapeamento de precisão GPS para Rua Orestes Lisboa, 124 (-7.1118, -34.8580).
+- Exibição de Campos de Latitude e Longitude GPS para ajuste fino manual.
+- Recálculo Dinâmico das Rotas: Move o pino da loja no mapa, recente a visão e recalcula todos os trajetos a partir do novo endereço.
+
+6. RECURSOS VISUAIS E PRIVACIDADE DA OPERAÇÃO
+--------------------------------------------------------------------------------
+- Ocultar Faturamento Diário: Botão de olho (Eye/EyeOff) no card de KPI para privacidade.
+- Alerta Pulsante de Pedidos Críticos: Efeito visual em vermelho vivo no card quando há pedidos >15 min.
+- Status da Frota Live: Exibição de motoboys em verde (Disponível) e vermelho (Em Rota com quantidade de entregas).
+- Maestro AI DeepSeek Decision Engine: Predição de tempo de retorno (ETR) do motoboy e sugestão de 3 planos acionáveis (Split, Parceria Externa iFood/Mottu e Lote Único).
+
+================================================================================
+                    SERVIDORES & CONFIGURAÇÃO DO REPOSITÓRIO
+================================================================================
+- Repositório Git: Atualizado na branch main.
+- Servidor VPS: 143.95.215.217:3002 (HTTP 200 OK em Docker Produção).
+================================================================================

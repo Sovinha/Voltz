@@ -21,6 +21,10 @@ frontend/.vercel
 # Database
 *.db-journal
 
+# Temporary Archives & Build Cache
+*.tar.gz
+*.tsbuildinfo
+
 # Operating System & IDE
 .DS_Store
 Thumbs.db

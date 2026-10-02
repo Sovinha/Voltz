@@ -46,6 +46,8 @@ export interface Pedido {
   nome_cliente: string;
   telefone_cliente?: string;
   endereco_entrega: string;
+  bairro?: string;
+  endereco_limpo_mapa?: string;
   latitude: number | null;
   longitude: number | null;
   itens: ItemPedido[];
